@@ -372,7 +372,7 @@ const { points: simple, maxDiscarded } = rdp(pct, EPSILON);
 console.log(`waypoints: ${simple.length} (from ${pct.length}, eps=${EPSILON})`);
 
 const waypoints = simple.map(([x, y]) => ({ x: +x.toFixed(2), y: +y.toFixed(2) }));
-const json = { grave: GRAVE, entrance: ENTRANCE, base: path.basename(BASE), epsilon: EPSILON, maxDeviation: +maxDiscarded.toFixed(3), waypoints };
+const json = { grave: GRAVE, entrance: ENTRANCE, base: path.basename(BASE), imageSize: { width: bw, height: bh }, epsilon: EPSILON, maxDeviation: +maxDiscarded.toFixed(3), waypoints };
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, JSON.stringify(json, null, 2) + '\n');
 console.log(`wrote ${OUT}`);

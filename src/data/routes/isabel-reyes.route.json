@@ -1,0 +1,37 @@
+{
+  "grave": "Isabel Reyes",
+  "entrance": "entranceMain",
+  "base": "agnipa map.jpg",
+  "imageSize": {
+    "width": 1921,
+    "height": 2061
+  },
+  "epsilon": 0.9,
+  "maxDeviation": 0.803,
+  "waypoints": [
+    {
+      "x": 32.34,
+      "y": 87.34
+    },
+    {
+      "x": 39.06,
+      "y": 82.97
+    },
+    {
+      "x": 50.94,
+      "y": 81.8
+    },
+    {
+      "x": 52.03,
+      "y": 82.1
+    },
+    {
+      "x": 51.41,
+      "y": 86.17
+    },
+    {
+      "x": 55.31,
+      "y": 86.32
+    }
+  ]
+}
