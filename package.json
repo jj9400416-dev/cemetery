@@ -1,0 +1,25 @@
+{
+  "name": "mappingcemetery",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 5000",
+    "serve:web": "vite preview --host 0.0.0.0 --port 5000"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
+    "ngraph.graph": "^20.1.2",
+    "ngraph.path": "^1.6.1",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-router-dom": "^7.18.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "sharp": "^0.35.4",
+    "vite": "^6.3.5"
+  }
+}
