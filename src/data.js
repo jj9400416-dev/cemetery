@@ -80,5 +80,5 @@ export const INITIAL_PLACES = [
   { id: 9, name: 'Carlos Dizon', section: 'S3', birthdate: 'May 12, 1939', dod: 'September 21, 2020', x: '61%', y: '25%' },
   { id: 10, name: 'Luz Mendoza', section: 'S2', birthdate: 'July 6, 1944', dod: 'November 3, 2022', x: '77%', y: '30%' },
   { id: 11, name: 'Ramon Bautista', section: 'S7', birthdate: 'August 11, 1959', dod: 'March 19, 2024', x: '66%', y: '53%' },
-  { id: 12, name: 'Isabel Reyes', section: 'S9', birthdate: 'March 9, 1942', dod: 'July 8, 2023', x: '32%', y: '58%' },
+  { id: 12, name: 'Isabel Reyes', section: 'S9', birthdate: 'March 9, 1942', dod: 'July 8, 2023', x: '55.31%', y: '86.32%' },
 ];
