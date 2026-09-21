@@ -2,46 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useGraves } from '../graves.jsx';
 import { useToast, EmptyState } from '../ui.jsx';
-import { mapImage, photoForName, INITIAL_CEMETERY_FEATURES, INITIAL_MAP_SECTIONS, REFERENCE_ROUTE } from '../data.js';
+import { mapImage, photoForName, INITIAL_CEMETERY_FEATURES, INITIAL_MAP_SECTIONS } from '../data.js';
+import { getRoute } from '../routing.js';
 
 const parsePercent = (v) => parseFloat(String(v).replace('%', '')) || 0;
-
-function buildRoute(origin, target) {
-  if (!origin || !target?.x || !target?.y) return [];
-  const startX = parsePercent(origin.x);
-  const startY = parsePercent(origin.y);
-  const endX = parsePercent(target.x);
-  const endY = parsePercent(target.y);
-  // Follow the Juan Delacruz.png reference backbone (entrance → central junction),
-  // then branch to the grave. Find the backbone vertex nearest the target.
-  let nearest = 0;
-  let best = Infinity;
-  REFERENCE_ROUTE.forEach(([bx, by], i) => {
-    const d = Math.hypot(bx - endX, by - endY);
-    if (d < best) { best = d; nearest = i; }
-  });
-  const points = [
-    { x: startX, y: startY },
-    ...REFERENCE_ROUTE.slice(0, nearest + 1).map(([x, y]) => ({ x, y })),
-    { x: endX, y: endY },
-  ];
-  // Drop near-duplicate consecutive points (<1% apart)
-  const clean = [points[0]];
-  for (let i = 1; i < points.length; i++) {
-    const prev = clean[clean.length - 1];
-    if (Math.hypot(points[i].x - prev.x, points[i].y - prev.y) >= 1) clean.push(points[i]);
-  }
-  const segs = [];
-  for (let i = 0; i < clean.length - 1; i++) {
-    const p = clean[i];
-    const n = clean[i + 1];
-    const length = Math.hypot(n.x - p.x, n.y - p.y);
-    if (length < 1) continue;
-    const angle = (Math.atan2(n.y - p.y, n.x - p.x) * 180) / Math.PI;
-    segs.push({ left: `${p.x}%`, top: `${p.y}%`, width: `${length}%`, angle });
-  }
-  return segs;
-}
+const toPt = (p) => (p?.x == null || p?.y == null ? null : { x: parsePercent(p.x), y: parsePercent(p.y) });
 
 export default function FindGrave() {
   const { places, loading, dbError, databaseConnected } = useGraves();
@@ -87,7 +52,12 @@ export default function FindGrave() {
   const highlightedIds = useMemo(() => new Set(filteredPlaces.map((p) => p.id)), [filteredPlaces]);
   const activeSectionId = activePlace?.section || null;
   const routeOrigin = INITIAL_CEMETERY_FEATURES.find((f) => f.id === 'entranceMain');
-  const routeSegments = useMemo(() => buildRoute(routeOrigin, routeAnchor), [routeOrigin, routeAnchor]);
+  const route = useMemo(
+    () => getRoute(routeAnchor?.name, toPt(routeAnchor), toPt(routeOrigin)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [routeAnchor?.name, routeAnchor?.x, routeAnchor?.y, routeOrigin?.x, routeOrigin?.y]
+  );
+  const routePoints = route?.points || [];
 
   const searchActive = searchText.trim() !== '' || sectionFilter !== 'All';
 
@@ -214,13 +184,11 @@ export default function FindGrave() {
                     </div>
                   );
                 })}
-                {routeSegments.map((seg, i) => (
-                  <div
-                    key={`route-${i}`}
-                    className="route-seg"
-                    style={{ left: seg.left, top: seg.top, width: seg.width, transform: `rotate(${seg.angle}deg)` }}
-                  />
-                ))}
+                <svg className="route-layer" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  {routePoints.length > 1 && (
+                    <polyline points={routePoints.map((p) => `${p.x},${p.y}`).join(' ')} />
+                  )}
+                </svg>
                 {filteredPlaces.map((p) => {
                   const photo = photoForName(p.name);
                   return (

@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 5000",
-    "serve:web": "vite preview --host 0.0.0.0 --port 5000"
+    "serve:web": "vite preview --host 0.0.0.0 --port 5000",
+    "routes:check": "node scripts/check-routes.js",
+    "routes:extract": "node scripts/extract-route.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",

@@ -1,4 +1,4 @@
-import mapImage from '../assets/Agnipa.jpg';
+import mapImage from '../assets/agnipa map.jpg';
 
 // Grave photos present in /assets. Keys are normalized names.
 import anaSantos from '../assets/Ana Santos.png';
@@ -51,16 +51,6 @@ export const INITIAL_CEMETERY_FEATURES = [
   { id: 'exitSouthEast', type: 'entrance', label: 'Exit', x: '78%', y: '60%', color: '#e67e22' },
 ];
 
-// Reference walking route traced from "Juan Delacruz.png" (blue line, south entrance → grave).
-// Waypoints are % of map width/height, ordered entrance → destination. Verified on Agnipa.jpg.
-export const REFERENCE_ROUTE = [
-  [30.7, 86.7],
-  [36.1, 82.8],
-  [53.6, 80.7],
-  [56.5, 78.2],
-  [51.1, 72.2],
-  [57.7, 64.8],
-];
 // Polygons traced directly from the blue outlines in Agnipa.jpg.
 // Extracted via blue-color segmentation + contour approximation (see overlay_holes.jpg verification).
 // Points are % of map width/height. S1-S11 cover all 11 blue loops, top to bottom.
