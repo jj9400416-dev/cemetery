@@ -8,7 +8,12 @@ import createGraph from 'ngraph.graph';
 import { aStar } from 'ngraph.path';
 
 const routeModules = import.meta.glob('./data/routes/*.json', { eager: true });
-export const ROUTES = Object.values(routeModules).map((m) => m.default || m);
+// Canonical per-grave files (`*.route.json`, extracted from the reference PNG
+// at the base image size) win over older extractions with the same grave name.
+const routeEntries = Object.entries(routeModules).sort(
+  ([a], [b]) => (b.endsWith('.route.json') ? 1 : 0) - (a.endsWith('.route.json') ? 1 : 0)
+);
+export const ROUTES = routeEntries.map(([, m]) => m.default || m);
 
 const normalize = (s) =>
   String(s || '')

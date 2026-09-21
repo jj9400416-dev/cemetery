@@ -8,6 +8,9 @@ import { getRoute } from '../routing.js';
 const parsePercent = (v) => parseFloat(String(v).replace('%', '')) || 0;
 const toPt = (p) => (p?.x == null || p?.y == null ? null : { x: parsePercent(p.x), y: parsePercent(p.y) });
 
+// Section polygons are placeholders — hidden until re-traced on agnipa map.jpg.
+const SHOW_SECTIONS = false;
+
 export default function FindGrave() {
   const { places, loading, dbError, databaseConnected } = useGraves();
   const toast = useToast();
@@ -145,11 +148,13 @@ export default function FindGrave() {
               onMouseUp={onMouseUp}
               onMouseLeave={onMouseUp}
             >
-              <div
-                className="map-inner"
-                style={{ transform: `scale(${mapZoom}) translate(${mapOffset.x / mapZoom}px, ${mapOffset.y / mapZoom}px)` }}
-              >
+              <div className="map-inner">
+                <div
+                  className="map-frame"
+                  style={{ transform: `scale(${mapZoom}) translate(${mapOffset.x / mapZoom}px, ${mapOffset.y / mapZoom}px)` }}
+                >
                 <img className="base" src={mapImage} alt="Agnipa cemetery map" draggable={false} />
+                {SHOW_SECTIONS && (
                 <svg className="section-layer" viewBox="0 0 100 100" preserveAspectRatio="none">
                   {INITIAL_MAP_SECTIONS.map((s) => {
                     if (!s.points) return null;
@@ -165,7 +170,8 @@ export default function FindGrave() {
                     );
                   })}
                 </svg>
-                {INITIAL_MAP_SECTIONS.map((s) => {
+                )}
+                {SHOW_SECTIONS && INITIAL_MAP_SECTIONS.map((s) => {
                   if (s.points) {
                     const xs = s.points.map((p) => p[0]);
                     const ys = s.points.map((p) => p[1]);
@@ -186,7 +192,10 @@ export default function FindGrave() {
                 })}
                 <svg className="route-layer" viewBox="0 0 100 100" preserveAspectRatio="none">
                   {routePoints.length > 1 && (
-                    <polyline points={routePoints.map((p) => `${p.x},${p.y}`).join(' ')} />
+                    <polyline
+                      points={routePoints.map((p) => `${p.x},${p.y}`).join(' ')}
+                      vectorEffect="non-scaling-stroke"
+                    />
                   )}
                 </svg>
                 {filteredPlaces.map((p) => {
@@ -210,6 +219,7 @@ export default function FindGrave() {
                 {searchActive && INITIAL_CEMETERY_FEATURES.map((f) => (
                   <div key={f.id} className="marker entrance" style={{ left: f.x, top: f.y }} title={f.label}>⌂</div>
                 ))}
+                </div>
               </div>
             </div>
             <div className="map-status">
