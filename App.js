@@ -15,6 +15,7 @@ import {
 import { useState, useEffect, useRef } from 'react';
 import * as Location from 'expo-location';
 import { supabase } from './supabaseClient';
+import JUAN_ROUTE from './src/data/routes/juan-dela-cruz.route.json';
 
 const INITIAL_CEMETERY_FEATURES = [
   { id: 'entranceMain', type: 'entrance', label: 'Main Entrance', x: '30%', y: '87%', color: '#e67e22' },
@@ -332,13 +333,10 @@ export default function App() {
         const startY = parsePercent(routeOrigin.y);
         const endX = parsePercent(displayedRouteTarget.x);
         const endY = parsePercent(displayedRouteTarget.y);
+        // Walkway backbone traced from Juan DelaCruz.png (percent of agnipa map.jpg).
         const routePoints = [
           { x: startX, y: startY },
-          { x: 37, y: 83 },
-          { x: 50.5, y: 81.7 },
-          { x: 49.7, y: 86.1 },
-          { x: 52.1, y: 87 },
-          { x: 53.9, y: 85.9 },
+          ...JUAN_ROUTE.waypoints,
           { x: endX, y: endY },
         ];
         const segments = [];
@@ -589,21 +587,25 @@ export default function App() {
             </Pressable>
           </View>
 
+          <View
+            style={[styles.mapFrame, { transform: [{ scale: mapZoom }, { translateX: mapOffset.x }, { translateY: mapOffset.y }] }]}
+            {...mapPanResponder.panHandlers}
+          >
           <ImageBackground
             source={MAP_IMAGE}
-            style={[styles.mapImage, { transform: [{ scale: mapZoom }, { translateX: mapOffset.x }, { translateY: mapOffset.y }] }]}
+            style={styles.mapImage}
             resizeMode="contain"
             onLayout={(event) => {
               const { width, height } = event.nativeEvent.layout;
               setMapContainerSize({ width, height });
             }}
-            {...mapPanResponder.panHandlers}
             onPress={handleMapTap}
           >
             {routeSegments.map((segment, index) => (
               <View key={`route-${index}`} style={[styles.routeSegment, segment]} />
             ))}
           </ImageBackground>
+          </View>
         </View>
 
         {displayPlace && (
@@ -907,6 +909,11 @@ const styles = StyleSheet.create({
   toolButtonText: {
     color: '#fff',
     fontWeight: '700',
+  },
+  mapFrame: {
+    width: '100%',
+    aspectRatio: 1921 / 2061,
+    overflow: 'hidden',
   },
   mapImage: {
     flex: 1,

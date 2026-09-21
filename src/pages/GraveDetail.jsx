@@ -58,10 +58,12 @@ export default function GraveDetail() {
           <div className="card" style={{ marginBottom: 18 }}>
             <h3 className="serif" style={{ margin: '0 0 10px' }}>Location in the park</h3>
             <div className="mini-map">
-              <img src={mapImage} alt="Cemetery map with grave location" />
-              <span className="marker grave selected has-photo" style={{ left: place.x, top: place.y }}>
-                {photo ? <img src={photo} alt="" className="marker-photo" /> : '✝'}
-              </span>
+              <div className="mini-frame">
+                <img src={mapImage} alt="Cemetery map with grave location" />
+                <span className="marker grave selected has-photo" style={{ left: place.x, top: place.y }}>
+                  {photo ? <img src={photo} alt="" className="marker-photo" /> : '✝'}
+                </span>
+              </div>
             </div>
             <p style={{ color: 'var(--muted)', fontSize: 14, margin: '12px 0 0' }}>
               Marker shows the recorded position in Section {place.section}. Follow the golden route from the Main Entrance on the full map.
