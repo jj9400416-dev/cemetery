@@ -1,0 +1,33 @@
+{
+  "grave": "Ana Santos",
+  "entrance": "entranceMain",
+  "base": "agnipa map.jpg",
+  "imageSize": {
+    "width": 1921,
+    "height": 2061
+  },
+  "epsilon": 0.9,
+  "maxDeviation": 0.412,
+  "waypoints": [
+    {
+      "x": 32.34,
+      "y": 87.34
+    },
+    {
+      "x": 39.06,
+      "y": 82.97
+    },
+    {
+      "x": 51.72,
+      "y": 81.8
+    },
+    {
+      "x": 51.41,
+      "y": 86.32
+    },
+    {
+      "x": 47.66,
+      "y": 88.94
+    }
+  ]
+}

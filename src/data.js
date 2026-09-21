@@ -76,7 +76,7 @@ export const INITIAL_PLACES = [
   { id: 5, name: 'Pedro Penduko', section: 'S5', birthdate: 'August 2, 1948', dod: 'July 14, 2021', x: '28%', y: '40%' },
   { id: 6, name: 'Mario Kulob', section: 'S6', birthdate: 'September 10, 1955', dod: 'March 8, 2022', x: '18%', y: '47%' },
   { id: 7, name: 'Jonel Carpio', section: 'S8', birthdate: 'November 30, 1963', dod: 'April 5, 2023', x: '72%', y: '62%' },
-  { id: 8, name: 'Ana Santos', section: 'S10', birthdate: 'January 25, 1948', dod: 'August 14, 2021', x: '43%', y: '78%' },
+  { id: 8, name: 'Ana Santos', section: 'S10', birthdate: 'January 25, 1948', dod: 'August 14, 2021', x: '47.66%', y: '88.94%' },
   { id: 9, name: 'Carlos Dizon', section: 'S3', birthdate: 'May 12, 1939', dod: 'September 21, 2020', x: '61%', y: '25%' },
   { id: 10, name: 'Luz Mendoza', section: 'S2', birthdate: 'July 6, 1944', dod: 'November 3, 2022', x: '77%', y: '30%' },
   { id: 11, name: 'Ramon Bautista', section: 'S7', birthdate: 'August 11, 1959', dod: 'March 19, 2024', x: '66%', y: '53%' },
