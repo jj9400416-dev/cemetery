@@ -127,7 +127,7 @@ export default function FindGrave() {
 
   const onMouseDown = (e) => {
     movedRef.current = false;
-    if (mapLocked || placing || tracing) return;
+    if (mapLocked) return;
     dragRef.current = { dragging: true, sx: e.clientX, sy: e.clientY, ox: mapOffset.x, oy: mapOffset.y };
   };
   const onMouseMove = (e) => {
