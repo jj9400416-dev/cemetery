@@ -289,7 +289,9 @@ export default function FindGrave() {
                 >
                 <img className="base" src={mapImage} alt="Cemetery map" draggable={false} />
 
-                <svg className="section-layer" viewBox="0 0 100 100" preserveAspectRatio="none">
+                {searchActive && (
+                  <>
+                  <svg className="section-layer" viewBox="0 0 100 100" preserveAspectRatio="none">
                   {INITIAL_MAP_SECTIONS.map((s) => {
                     if (!s.points) return null;
                     const isSelected = sectionFilter !== 'All' && sectionFilter === s.id;
@@ -304,7 +306,9 @@ export default function FindGrave() {
                     );
                   })}
                 </svg>
-                {INITIAL_MAP_SECTIONS.map((s) => {
+                  </>
+                )}
+                {searchActive && INITIAL_MAP_SECTIONS.map((s) => {
                   if (s.points) {
                     const xs = s.points.map((p) => p[0]);
                     const ys = s.points.map((p) => p[1]);
