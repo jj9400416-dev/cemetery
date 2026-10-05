@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { useGraves } from '../graves.jsx';
@@ -302,7 +302,14 @@ function Dashboard({ email, onLogout }) {
 }
 
 function RouteTracer({ points, onChange }) {
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [locked, setLocked] = useState(false);
+  const dragRef = useRef({ dragging: false, sx: 0, sy: 0, ox: 0, oy: 0 });
+  const movedRef = useRef(false);
+
   const addPoint = (e) => {
+    if (movedRef.current) { movedRef.current = false; return; }
     const img = e.currentTarget.querySelector('img.base');
     if (!img) return;
     const r = img.getBoundingClientRect();
@@ -313,19 +320,52 @@ function RouteTracer({ points, onChange }) {
     const clamp = (v) => Math.min(100, Math.max(0, +v.toFixed(2)));
     onChange([...points, { x: clamp(x), y: clamp(y) }]);
   };
+
+  const onMouseDown = (e) => {
+    movedRef.current = false;
+    if (locked) return;
+    dragRef.current = { dragging: true, sx: e.clientX, sy: e.clientY, ox: offset.x, oy: offset.y };
+  };
+  const onMouseMove = (e) => {
+    if (!dragRef.current.dragging || locked) return;
+    movedRef.current = true;
+    setOffset({
+      x: dragRef.current.ox + (e.clientX - dragRef.current.sx),
+      y: dragRef.current.oy + (e.clientY - dragRef.current.sy),
+    });
+  };
+  const onMouseUp = () => { dragRef.current.dragging = false; };
+
+  const invScale = 1 / (zoom || 1);
+
   return (
     <div style={{ marginTop: 18, borderTop: '1px solid var(--line, #e5dfc9)', paddingTop: 14 }}>
       <label className="field">Add route (optional) — tap the map in walking order from the Main Entrance</label>
-      <div onClick={addPoint} style={{ position: 'relative', cursor: 'crosshair' }}>
-        <img className="base" src={mapImage} alt="Cemetery map" style={{ width: '100%', borderRadius: 12, display: 'block' }} draggable={false} />
-        {points.length > 1 && (
-          <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} viewBox="0 0 100 100" preserveAspectRatio="none">
-            <polyline points={points.map((p) => `${p.x},${p.y}`).join(' ')} vectorEffect="non-scaling-stroke" style={{ stroke: '#ffd23e', strokeWidth: 2, strokeDasharray: '3 2', fill: 'none' }} />
-          </svg>
-        )}
-        {points.map((p, i) => (
-          <span key={`wp-${i}`} style={{ position: 'absolute', left: `${p.x}%`, top: `${p.y}%`, width: 16, height: 16, borderRadius: '50%', background: '#ffd23e', border: '2px solid #0f2a20', transform: 'translate(-50%, -50%)', fontSize: 9, fontWeight: 800, color: '#0f2a20', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
-        ))}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+        <button type="button" className="btn btn-light btn-sm" onClick={() => setZoom((z) => Math.min(2.6, +(z + 0.2).toFixed(2)))}>+</button>
+        <button type="button" className="btn btn-light btn-sm" onClick={() => setZoom((z) => Math.max(1, +(z - 0.2).toFixed(2)))}>−</button>
+        <button type="button" className="btn btn-light btn-sm" onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }} style={{ fontSize: 12 }}>Reset</button>
+        <button type="button" className="btn btn-light btn-sm" onClick={() => setLocked((v) => !v)} style={{ fontSize: 12 }}>{locked ? 'Unlock' : 'Lock'}</button>
+      </div>
+      <div
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseUp}
+        onClick={addPoint}
+        style={{ cursor: 'crosshair', overflow: 'hidden', position: 'relative', borderRadius: 12 }}
+      >
+        <div style={{ position: 'relative', transform: `scale(${zoom}) translate(${offset.x / zoom}px, ${offset.y / zoom}px)` }}>
+          <img className="base" src={mapImage} alt="Cemetery map" draggable={false} style={{ width: '100%', borderRadius: 12, display: 'block' }} />
+          {points.length > 1 && (
+            <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} viewBox="0 0 100 100" preserveAspectRatio="none">
+              <polyline points={points.map((p) => `${p.x},${p.y}`).join(' ')} vectorEffect="non-scaling-stroke" style={{ stroke: '#ffd23e', strokeWidth: 2, strokeDasharray: '3 2', fill: 'none' }} />
+            </svg>
+          )}
+          {points.map((p, i) => (
+            <span key={`wp-${i}`} style={{ position: 'absolute', left: `${p.x}%`, top: `${p.y}%`, width: 16, height: 16, borderRadius: '50%', background: '#ffd23e', border: '2px solid #0f2a20', transform: `translate(-50%, -50%) scale(${invScale})`, fontSize: 9, fontWeight: 800, color: '#0f2a20', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
+          ))}
+        </div>
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
         <span style={{ fontSize: 13, color: 'var(--muted)' }}>
