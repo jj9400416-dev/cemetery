@@ -148,8 +148,7 @@ function shortestPath(fromId, toId) {
 }
 
 // Returns {points: [{x,y}], exact: bool} or null when no route data exists.
-export function getRoute(graveName, gravePt, entrancePt) {
-  if (!gravePt || !entrancePt) return null;
+export function getRoute(graveName, gravePt, entrancePt) {  if (!gravePt || !entrancePt) return null;
   const { nodes, edges } = getGraph();
   if (!nodes.length) return null;
 
@@ -187,4 +186,25 @@ export function getRoute(graveName, gravePt, entrancePt) {
   }
   if (!best) return null;
   return { points: [...best, { x: snap.x, y: snap.y }, { x: gravePt.x, y: gravePt.y }], exact: false };
+}
+
+// Runtime routes saved from the app (custom_routes table). They take
+// precedence over bundled extractions; the walkway graph rebuilds lazily.
+export function addCustomRoutes(routes) {
+  let changed = false;
+  for (const r of routes || []) {
+    if (!r?.grave || !((r.waypoints || []).length > 1)) continue;
+    const key = normalize(r.grave);
+    const entry = {
+      grave: r.grave,
+      entrance: r.entrance || 'entranceMain',
+      waypoints: r.waypoints.map((w) => ({ x: +w.x, y: +w.y })),
+    };
+    const i = ROUTES.findIndex((x) => normalize(x.grave) === key);
+    if (i >= 0) ROUTES[i] = entry;
+    else ROUTES.unshift(entry);
+    changed = true;
+  }
+  if (changed) cache = null;
+  return changed;
 }

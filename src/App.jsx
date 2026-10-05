@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Link, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider } from './auth.jsx';
 import { GravesProvider } from './graves.jsx';
 import { ToastProvider } from './ui.jsx';
 import Navbar from './components/Navbar.jsx';
 import Footer from './components/Footer.jsx';
+import { useAuth } from './auth.jsx';
 import Home from './pages/Home.jsx';
 import FindGrave from './pages/FindGrave.jsx';
 import GraveDetail from './pages/GraveDetail.jsx';
@@ -12,6 +13,9 @@ import About from './pages/About.jsx';
 import Services from './pages/Services.jsx';
 import Contact from './pages/Contact.jsx';
 import Admin from './pages/Admin.jsx';
+import Login from './pages/Login.jsx';
+import AdminLogin from './pages/AdminLogin.jsx';
+import Signup from './pages/Signup.jsx';
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -19,6 +23,40 @@ function ScrollToTop() {
     window.scrollTo(0, 0);
   }, [pathname]);
   return null;
+}
+
+function Layout() {
+  const { pathname } = useLocation();
+  const { isSignedIn } = useAuth();
+  const isAuthPage = pathname === '/login' || pathname === '/signup' || pathname === '/admin-login';
+
+  // Require sign-in before anything else: any route other than the auth
+  // pages bounces a signed-out visitor to /login (and back after sign-in).
+  if (!isSignedIn && !isAuthPage) {
+    return <Navigate to={`/login?next=${encodeURIComponent(pathname)}`} replace />;
+  }
+
+  return (
+    <>
+      {!isAuthPage && <Navbar />}
+      <main style={{ minHeight: isAuthPage ? '100vh' : 'calc(100vh - 68px)' }}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/find" element={<FindGrave />} />
+          <Route path="/grave/:id" element={<GraveDetail />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/services" element={<Services />} />
+          <Route path="/contact" element={<Contact />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/admin-login" element={<AdminLogin />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route path="/admin" element={<Admin />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </main>
+      {!isAuthPage && <Footer />}
+    </>
+  );
 }
 
 function NotFound() {
@@ -39,20 +77,7 @@ export default function App() {
         <GravesProvider>
           <BrowserRouter>
             <ScrollToTop />
-            <Navbar />
-            <main style={{ minHeight: 'calc(100vh - 68px)' }}>
-              <Routes>
-                <Route path="/" element={<Home />} />
-                <Route path="/find" element={<FindGrave />} />
-                <Route path="/grave/:id" element={<GraveDetail />} />
-                <Route path="/about" element={<About />} />
-                <Route path="/services" element={<Services />} />
-                <Route path="/contact" element={<Contact />} />
-                <Route path="/admin" element={<Admin />} />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </main>
-            <Footer />
+            <Layout />
           </BrowserRouter>
         </GravesProvider>
       </AuthProvider>

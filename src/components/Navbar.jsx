@@ -12,7 +12,7 @@ const LINKS = [
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
-  const { isAdmin, logout } = useAuth();
+  const { isAdmin, isSignedIn, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -59,13 +59,17 @@ export default function Navbar() {
                 Logout
               </a>
             </>
+          ) : isSignedIn ? (
+            <a href="#logout" onClick={(e) => { e.preventDefault(); handleLogout(); }}>
+              Logout
+            </a>
           ) : (
             <NavLink
-              to="/admin"
+              to="/login"
               onClick={() => setOpen(false)}
               className={({ isActive }) => (isActive ? 'active nav-cta' : 'nav-cta')}
             >
-              Admin Login
+              Login
             </NavLink>
           )}
         </nav>

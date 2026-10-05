@@ -4,17 +4,42 @@ import mapImage from '../assets/agnipa map.jpg';
 import anaSantos from '../assets/Ana Santos.png';
 import carlosDizon from '../assets/Carlos Dizon.png';
 import isabelReyes from '../assets/Isabel Reyes.png';
-import jonelCarpio from '../assets/Jonel Carpio.png';
+const jonelCarpio = '/Jonel Carpio.png';
 import joseRizal from '../assets/Jose Rizal.png';
 import juanDelacruz from '../assets/Juan Delacruz.png';
 import luzMenduza from '../assets/Luz Menduza.png';
 import mariaClara from '../assets/Maria Clara.jpg';
-import marioKulob from '../assets/Mario Kulob.png';
+// The result for Mario Kulob is the actual file served verbatim from public/.
+const marioKulob = '/Mario Kulob.png';
 import pedroPenduko from '../assets/Pedro Penduko.png';
 import peroJesus from '../assets/Pero Jesus.png';
 import ramonBautista from '../assets/Ramon Bautista.png';
 
 export { mapImage };
+
+// --- Agnipa.jpg display frame -----------------------------------------------
+// Grave x/y, entrances and extracted routes are stored as percent of the
+// canonical base `assets/agnipa map.jpg` (see scripts/extract-route.js).
+// The Find a Grave sections map is displayed on `assets/Agnipa.jpg` — the same
+// photo in a slightly different crop window. Image registration between the two
+// is a pure translation with no scale or rotation (full-frame MAD 52 -> 7.2 at
+// the optimal integer shift):  agnipa_px = map_px + (-25, +57).
+// Convert canonical coordinates with toAgnipaX/Y when rendering on Agnipa.jpg.
+const MAP_W = 1921;
+const MAP_H = 2061;
+const AGNIPA_W = 1984;
+const AGNIPA_H = 2114;
+const AGNIPA_DX = -25;
+const AGNIPA_DY = 57;
+
+const pctValue = (v) => parseFloat(String(v ?? '').replace('%', '')) || 0;
+
+export const toAgnipaX = (v) => (((pctValue(v) / 100) * MAP_W + AGNIPA_DX) / AGNIPA_W) * 100;
+export const toAgnipaY = (v) => (((pctValue(v) / 100) * MAP_H + AGNIPA_DY) / AGNIPA_H) * 100;
+
+// Inverse: Agnipa.jpg frame percent -> canonical base percent (for map taps).
+export const fromAgnipaX = (v) => (((pctValue(v) / 100) * AGNIPA_W - AGNIPA_DX) / MAP_W) * 100;
+export const fromAgnipaY = (v) => (((pctValue(v) / 100) * AGNIPA_H - AGNIPA_DY) / MAP_H) * 100;
 
 const normalize = (s) =>
   String(s || '')
@@ -51,9 +76,11 @@ export const INITIAL_CEMETERY_FEATURES = [
   { id: 'exitSouthEast', type: 'entrance', label: 'Exit', x: '78%', y: '60%', color: '#e67e22' },
 ];
 
-// Polygons traced directly from the blue outlines in Agnipa.jpg.
+// Polygons traced directly from the blue outlines in Agnipa.jpg — the image
+// displayed behind this layer on the Find a Grave map, so they sit exactly on
+// the baked-in outlines.
 // Extracted via blue-color segmentation + contour approximation (see overlay_holes.jpg verification).
-// Points are % of map width/height. S1-S11 cover all 11 blue loops, top to bottom.
+// Points are % of Agnipa.jpg width/height. S1-S11 cover all 11 blue loops, top to bottom.
 export const INITIAL_MAP_SECTIONS = [
   { id: 'S1', label: 'S1', color: '#4da6ff', points: [[59, 12.6], [58.5, 26.9], [41.7, 49.5], [41.1, 44], [35.1, 35.8], [35.2, 28.1], [51.4, 14.6], [53.1, 11.3]] },
   { id: 'S2', label: 'S2', color: '#4da6ff', points: [[75.5, 22.6], [79.7, 27.3], [80, 34], [78.8, 32.9], [78.4, 33.7], [74.1, 33]] },
@@ -69,7 +96,7 @@ export const INITIAL_MAP_SECTIONS = [
 ];
 
 export const INITIAL_PLACES = [
-  { id: 1, name: 'Juan Dela Cruz', section: 'S7', birthdate: 'January 15, 1940', dod: 'February 10, 2020', x: '57.7%', y: '64.8%' },
+  { id: 1, name: 'Juan Dela Cruz', section: 'S7', birthdate: 'January 15, 1940', dod: 'February 10, 2020', x: '59.2%', y: '64.94%' },
   { id: 2, name: 'Pero Jesus', section: 'S2', birthdate: 'March 18, 1952', dod: 'June 22, 2018', x: '77%', y: '28%' },
   { id: 3, name: 'Maria Clara', section: 'S4', birthdate: 'October 4, 1938', dod: 'December 9, 2019', x: '65%', y: '28%' },
   { id: 4, name: 'Jose Rizal', section: 'S4', birthdate: 'June 19, 1861', dod: 'December 30, 1896', x: '58%', y: '45%' },
@@ -77,7 +104,7 @@ export const INITIAL_PLACES = [
   { id: 6, name: 'Mario Kulob', section: 'S6', birthdate: 'September 10, 1955', dod: 'March 8, 2022', x: '18%', y: '47%' },
   { id: 7, name: 'Jonel Carpio', section: 'S8', birthdate: 'November 30, 1963', dod: 'April 5, 2023', x: '72%', y: '62%' },
   { id: 8, name: 'Ana Santos', section: 'S10', birthdate: 'January 25, 1948', dod: 'August 14, 2021', x: '47.66%', y: '88.94%' },
-  { id: 9, name: 'Carlos Dizon', section: 'S3', birthdate: 'May 12, 1939', dod: 'September 21, 2020', x: '61%', y: '25%' },
+  { id: 9, name: 'Carlos Dizon', section: 'S11', birthdate: 'May 12, 1939', dod: 'September 21, 2020', x: '48.28%', y: '89.67%' },
   { id: 10, name: 'Luz Mendoza', section: 'S2', birthdate: 'July 6, 1944', dod: 'November 3, 2022', x: '77%', y: '30%' },
   { id: 11, name: 'Ramon Bautista', section: 'S7', birthdate: 'August 11, 1959', dod: 'March 19, 2024', x: '66%', y: '53%' },
   { id: 12, name: 'Isabel Reyes', section: 'S9', birthdate: 'March 9, 1942', dod: 'July 8, 2023', x: '55.31%', y: '86.32%' },

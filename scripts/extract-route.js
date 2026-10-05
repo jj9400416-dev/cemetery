@@ -51,6 +51,13 @@ function isBlue(r, g, b) {
   return b > 120 && b - r > 60 && b - g > 15;
 }
 
+function isOrange(r, g, b) {
+  return r > 200 && g > 70 && g < 190 && b < 110 && r - b > 110 && r - g > 60;
+}
+
+const LINE_COLOR = (args.color || 'blue').toLowerCase();
+const isLine = LINE_COLOR === 'orange' ? isOrange : isBlue;
+
 async function loadRaw(p, w, h) {
   let img = sharp(p).removeAlpha();
   if (w && h) img = img.resize(w, h, { fit: 'fill' });
@@ -65,7 +72,7 @@ function toGray(raw) {
   for (let i = 0, p = 0; i < data.length; i += 3, p++) {
     const r = data[i], gg = data[i + 1], b = data[i + 2];
     g[p] = r * 0.299 + gg * 0.587 + b * 0.114;
-    blue[p] = isBlue(r, gg, b) ? 1 : 0;
+    blue[p] = isLine(r, gg, b) ? 1 : 0;
   }
   return { g, blue, w, h };
 }
@@ -328,7 +335,7 @@ for (let y = 0; y < bh; y++) {
     const [r, g, b] = sampleBilinear(refRaw.data, rw, rh, rnx, rny);
     const bi = (y * bw + x) * 3;
     const br = baseRaw.data[bi], bg = baseRaw.data[bi + 1], bb = baseRaw.data[bi + 2];
-    const blue = isBlue(r, g, b);
+    const blue = isLine(r, g, b);
     const diff = (Math.abs(r - br) + Math.abs(g - bg) + Math.abs(b - bb)) / 3;
     if (blue) blueN++;
     if (diff > DIFF_T) diffN++;

@@ -16,6 +16,7 @@ import { useState, useEffect, useRef } from 'react';
 import * as Location from 'expo-location';
 import { supabase } from './supabaseClient';
 import JUAN_ROUTE from './src/data/routes/juan-dela-cruz.route.json';
+import CARLOS_ROUTE from './src/data/routes/carlos-dizon.route.json';
 
 const INITIAL_CEMETERY_FEATURES = [
   { id: 'entranceMain', type: 'entrance', label: 'Main Entrance', x: '30%', y: '87%', color: '#e67e22' },
@@ -41,15 +42,15 @@ const INITIAL_MAP_SECTIONS = [
 ];
 
 const INITIAL_PLACES = [
-  { id: 1, name: 'Juan Dela Cruz', section: 'A1', birthdate: 'January 15, 1940', dod: 'February 10, 2020', x: '65%', y: '13%' },
+  { id: 1, name: 'Juan Dela Cruz', section: 'A1', birthdate: 'January 15, 1940', dod: 'February 10, 2020', x: '65%', y: '13%', image: require('./assets/Juan Delacruz.png') },
   { id: 2, name: 'Pero Jesus', section: 'A2', birthdate: 'March 18, 1952', dod: 'June 22, 2018', x: '81%', y: '22%' },
   { id: 3, name: 'Maria Clara', section: 'A3', birthdate: 'October 4, 1938', dod: 'December 9, 2019', x: '65%', y: '28%' },
   { id: 4, name: 'Jose Rizal', section: 'B2', birthdate: 'June 19, 1861', dod: 'December 30, 1896', x: '58%', y: '45%' },
   { id: 5, name: 'Pedro Penduko', section: 'B3', birthdate: 'August 2, 1948', dod: 'July 14, 2021', x: '28%', y: '40%' },
-  { id: 6, name: 'Mario Kulob', section: 'C3', birthdate: 'September 10, 1955', dod: 'March 8, 2022', x: '13%', y: '53%' },
-  { id: 7, name: 'Jonel Carpio', section: 'D3', birthdate: 'November 30, 1963', dod: 'April 5, 2023', x: '75%', y: '67%' },
-  { id: 8, name: 'Ana Santos', section: 'E1', birthdate: 'January 25, 1948', dod: 'August 14, 2021', x: '43%', y: '78%' },
-  { id: 9, name: 'Carlos Dizon', section: 'A1', birthdate: 'May 12, 1939', dod: 'September 21, 2020', x: '69%', y: '18%' },
+  { id: 6, name: 'Mario Kulob', section: 'C3', birthdate: 'September 10, 1955', dod: 'March 8, 2022', x: '13%', y: '53%', image: { uri: '/Mario Kulob.png' } },
+  { id: 7, name: 'Jonel Carpio', section: 'D3', birthdate: 'November 30, 1963', dod: 'April 5, 2023', x: '75%', y: '67%', image: { uri: '/Jonel Carpio.png' } },
+  { id: 8, name: 'Ana Santos', section: 'E1', birthdate: 'January 25, 1948', dod: 'August 14, 2021', x: '43%', y: '78%', image: require('./assets/Ana Santos.png') },
+  { id: 9, name: 'Carlos Dizon', section: 'A1', birthdate: 'May 12, 1939', dod: 'September 21, 2020', x: '69%', y: '18%', image: require('./assets/Carlos Dizon.png') },
   { id: 10, name: 'Luz Mendoza', section: 'A2', birthdate: 'July 6, 1944', dod: 'November 3, 2022', x: '86%', y: '27%' },
   { id: 11, name: 'Ramon Bautista', section: 'B2', birthdate: 'August 11, 1959', dod: 'March 19, 2024', x: '66%', y: '53%' },
   { id: 12, name: 'Isabel Reyes', section: 'B3', birthdate: 'March 9, 1942', dod: 'July 8, 2023', x: '36%', y: '52%', image: require('./assets/Isabel Reyes.png') },
@@ -271,9 +272,14 @@ export default function App() {
         return;
       }
 
-      setPlaces(data.map(place => place.name === 'Isabel Reyes'
-        ? { ...place, image: require('./assets/Isabel Reyes.png') }
-        : place));
+      setPlaces(data.map(place => {
+        if (place.name === 'Isabel Reyes') return { ...place, image: require('./assets/Isabel Reyes.png') };
+        if (place.name === 'Ana Santos') return { ...place, image: require('./assets/Ana Santos.png') };
+        if (place.name === 'Carlos Dizon') return { ...place, image: require('./assets/Carlos Dizon.png') };
+        if (place.name === 'Mario Kulob') return { ...place, image: { uri: '/Mario Kulob.png' } };
+        if (place.name === 'Jonel Carpio') return { ...place, image: { uri: '/Jonel Carpio.png' } };
+        return place;
+      }));
       setDatabaseConnected(true);
     };
 
@@ -333,10 +339,13 @@ export default function App() {
         const startY = parsePercent(routeOrigin.y);
         const endX = parsePercent(displayedRouteTarget.x);
         const endY = parsePercent(displayedRouteTarget.y);
-        // Walkway backbone traced from Juan DelaCruz.png (percent of agnipa map.jpg).
+        // Walkway backbone traced from each grave's own reference PNG (percent of agnipa map.jpg).
+        const backbone = displayedRouteTarget.name === 'Carlos Dizon'
+          ? CARLOS_ROUTE.waypoints
+          : JUAN_ROUTE.waypoints;
         const routePoints = [
           { x: startX, y: startY },
-          ...JUAN_ROUTE.waypoints,
+          ...backbone,
           { x: endX, y: endY },
         ];
         const segments = [];
@@ -565,6 +574,9 @@ export default function App() {
             <Text style={styles.searchHint}>{searchHint}</Text>
             {filteredPlaces.length === 1 && (
               <Pressable style={styles.searchResultButton} onPress={() => selectSearchResult(filteredPlaces[0])}>
+                {filteredPlaces[0].image && (
+                  <Image source={filteredPlaces[0].image} style={styles.searchResultThumb} resizeMode="cover" />
+                )}
                 <Text style={styles.searchResultButtonText}>View result: {filteredPlaces[0].name}</Text>
               </Pressable>
             )}
@@ -875,6 +887,15 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 11,
     paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  searchResultThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: '#fff',
   },
   searchResultButtonText: {
     color: '#fff',
@@ -952,7 +973,7 @@ const styles = StyleSheet.create({
   },
   routeSegment: {
     position: 'absolute',
-    height: 4,
+    height: 7,
     backgroundColor: '#ff8a00',
     borderRadius: 999,
     opacity: 0.9,

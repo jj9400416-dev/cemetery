@@ -60,8 +60,11 @@ export default function GraveDetail() {
             <div className="mini-map">
               <div className="mini-frame">
                 <img src={mapImage} alt="Cemetery map with grave location" />
-                <span className="marker grave selected has-photo" style={{ left: place.x, top: place.y }}>
-                  {photo ? <img src={photo} alt="" className="marker-photo" /> : '✝'}
+                <span className="marker-pin selected" style={{ left: place.x, top: place.y }}>
+                  <svg viewBox="0 0 24 34" aria-hidden="true">
+                    <path d="M12 0C5.4 0 0 5.6 0 12.5 0 22 12 34 12 34s12-12 12-21.5C24 5.6 18.6 0 12 0z" fill="#c9a227" stroke="#fff" strokeWidth="1.6" />
+                    <circle cx="12" cy="12.5" r="4.6" fill="#fff" />
+                  </svg>
                 </span>
               </div>
             </div>

@@ -22,7 +22,7 @@ export default function Footer() {
           <h4>Support</h4>
           <Link to="/contact">Contact Us</Link>
           <Link to="/services">Rules & Regulations</Link>
-          <Link to="/admin">Admin Login</Link>
+          <Link to="/admin-login">Admin Login</Link>
         </div>
         <div>
           <h4>Visit Us</h4>
