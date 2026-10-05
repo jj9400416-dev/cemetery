@@ -289,6 +289,41 @@ export default function FindGrave() {
                 >
                 <img className="base" src={mapImage} alt="Cemetery map" draggable={false} />
 
+                <svg className="section-layer" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  {INITIAL_MAP_SECTIONS.map((s) => {
+                    if (!s.points) return null;
+                    const isSelected = sectionFilter !== 'All' && sectionFilter === s.id;
+                    const isActive = s.id === activeSectionId;
+                    const isDimmed = sectionFilter !== 'All' && !isSelected;
+                    return (
+                      <polygon
+                        key={s.id}
+                        points={s.points.map((p) => p.join(',')).join(' ')}
+                        className={`section-poly${isActive || isSelected ? ' active' : ''}${isDimmed ? ' dimmed' : ''}`}
+                      />
+                    );
+                  })}
+                </svg>
+                {INITIAL_MAP_SECTIONS.map((s) => {
+                  if (s.points) {
+                    const xs = s.points.map((p) => p[0]);
+                    const ys = s.points.map((p) => p[1]);
+                    const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
+                    const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+                    const isDimmed = sectionFilter !== 'All' && sectionFilter !== s.id;
+                    return (
+                      <div key={s.id} className={`section-label${isDimmed ? ' dimmed' : ''}`} style={{ left: `${cx}%`, top: `${cy}%` }}>
+                        {s.label}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={s.id} className="section-box" style={{ left: s.x, top: s.y, width: s.width, height: s.height }}>
+                      {s.label}
+                    </div>
+                  );
+                })}
+
                 {/* Grave pins stay hidden until the visitor searches a name —
                     then matching markers appear. The selected grave keeps its pin. */}
                 {(searchActive ? filteredPlaces : activePlace ? [activePlace] : []).map((p) => {
