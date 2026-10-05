@@ -46,6 +46,7 @@ export default function FindGrave() {
   const [tracing, setTracing] = useState(false);
   const [routePts, setRoutePts] = useState([]);
   const [routeGrave, setRouteGrave] = useState('');
+  const [routeName, setRouteName] = useState(''); // custom name not in the database
   const [customRev, setCustomRev] = useState(0);
   const dragRef = useRef({ dragging: false, sx: 0, sy: 0, ox: 0, oy: 0 });
   const movedRef = useRef(false);
@@ -204,9 +205,9 @@ export default function FindGrave() {
 
   const saveRoute = async (e) => {
     e?.preventDefault();
-    const gname = routeGrave || activePlace?.name || '';
+    const gname = routeName.trim() || routeGrave || activePlace?.name || '';
     if (!gname) {
-      toast.error('Select a grave first.');
+      toast.error('Select a grave or type a name first.');
       return;
     }
     if (routePts.length < 2) {
@@ -505,6 +506,14 @@ export default function FindGrave() {
                         <option key={p.id} value={p.name}>{p.name} — Section {p.section}</option>
                       ))}
                     </select>
+                    <label className="field" style={{ marginTop: 10 }}>Or type a name not in the database</label>
+                    <input
+                      className="input"
+                      style={{ width: '100%' }}
+                      placeholder="e.g. Maria Santos"
+                      value={routeName}
+                      onChange={(e) => setRouteName(e.target.value)}
+                    />
                     <button
                       type="button"
                       className={tracing ? 'btn btn-red btn-sm' : 'btn btn-light btn-sm'}
