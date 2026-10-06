@@ -1,6 +1,6 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useGraves } from '../graves.jsx';
-import { mapImage, photoForName } from '../data.js';
+import { mapImage, photoForName, graveSection } from '../data.js';
 import { EmptyState } from '../ui.jsx';
 
 export default function GraveDetail() {
@@ -31,7 +31,6 @@ export default function GraveDetail() {
   }
 
   const photo = photoForName(place.name);
-  const siblings = places.filter((p) => p.section === place.section && String(p.id) !== String(place.id)).slice(0, 3);
 
   return (
     <div className="container" style={{ paddingTop: 28, paddingBottom: 56 }}>
@@ -40,22 +39,20 @@ export default function GraveDetail() {
       </button>
       <div className="grid grid-2" style={{ alignItems: 'start' }}>
         <div className="card">
-          <span className="pill">Section {place.section || '—'} · Record #{place.id}</span>
+          <span className="pill">Section {graveSection(place)} · Record #{place.id}</span>
           <h1 className="serif" style={{ margin: '6px 0 14px', fontSize: 38 }}>{place.name}</h1>
           {photo && <img src={photo} alt={place.name} style={{ width: '100%', borderRadius: 14, objectPosition: 'top', objectFit: 'cover', maxHeight: 460, background: '#eee7d5' }} />}
           <div style={{ marginTop: 14 }}>
             <div className="fact"><span>Born</span><span>{place.birthdate || 'Not recorded'}</span></div>
             <div className="fact"><span>Passed away</span><span>{place.dod || 'Not recorded'}</span></div>
-            <div className="fact"><span>Section</span><span>{place.section || 'Not recorded'}</span></div>
+            <div className="fact"><span>Section</span><span>{graveSection(place)}</span></div>
             <div className="fact" style={{ borderBottom: 0 }}><span>Level</span><span>{place.level ?? '—'}</span></div>
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
             <Link className="btn btn-gold" to={`/find?name=${encodeURIComponent(place.name)}`}>Show route on map</Link>
             <Link className="btn btn-light" to="/contact">Report an correction</Link>
           </div>
-        </div>
-        <div>
-          <div className="card" style={{ marginBottom: 18 }}>
+          <div style={{ marginTop: 18, borderTop: '1px solid var(--line, #e5dfc9)', paddingTop: 14 }}>
             <h3 className="serif" style={{ margin: '0 0 10px' }}>Location in the park</h3>
             <div className="mini-map">
               <div className="mini-frame">
@@ -69,21 +66,9 @@ export default function GraveDetail() {
               </div>
             </div>
             <p style={{ color: 'var(--muted)', fontSize: 14, margin: '12px 0 0' }}>
-              Marker shows the recorded position in Section {place.section}. Follow the golden route from the Main Entrance on the full map.
+              Marker shows the recorded position in Section {graveSection(place)}. Follow the golden route from the Main Entrance on the full map.
             </p>
           </div>
-          {siblings.length > 0 && (
-            <div className="card">
-              <h3 className="serif" style={{ margin: '0 0 12px' }}>Nearby in Section {place.section}</h3>
-              {siblings.map((s) => (
-                <div key={s.id} className="list-item">
-                  {photoForName(s.name) && <img src={photoForName(s.name)} alt="" className="list-thumb" />}
-                  <span style={{ flex: 1 }}><b>{s.name}</b></span>
-                  <Link className="btn btn-light btn-sm" to={`/grave/${s.id}`}>View</Link>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     </div>

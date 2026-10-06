@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useGraves } from '../graves.jsx';
-import { photoForName, INITIAL_MAP_SECTIONS } from '../data.js';
+import { photoForName, INITIAL_MAP_SECTIONS, graveSection } from '../data.js';
 import { SectionHead } from '../ui.jsx';
 import agnipaPhoto from '../../assets/Agnipa.jpg';
 
@@ -11,7 +11,7 @@ export default function Home() {
   const navigate = useNavigate();
 
   const sections = useMemo(
-    () => [...new Set(places.map((p) => p.section).filter(Boolean))],
+    () => [...new Set(places.map((p) => graveSection(p)).filter(Boolean))],
     [places]
   );
   const featured = useMemo(() => places.slice(0, 4), [places]);
@@ -114,7 +114,7 @@ export default function Home() {
               >
                 {photoForName(p.name) && <img src={photoForName(p.name)} alt={p.name} loading="lazy" />}
                 <div className="body">
-                  <span className="pill">Section {p.section}</span>
+                  <span className="pill">Section {graveSection(p)}</span>
                   <h3>{p.name}</h3>
                   <div className="meta">{p.dod ? `† ${p.dod}` : 'Rest in peace'}</div>
                 </div>
@@ -136,7 +136,7 @@ export default function Home() {
           />
           <div className="grid grid-4">
             {INITIAL_MAP_SECTIONS.map((s) => {
-              const count = places.filter((p) => p.section === s.id).length;
+              const count = places.filter((p) => graveSection(p) === s.id).length;
               return (
                 <Link
                   key={s.id}

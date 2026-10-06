@@ -1,14 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { useGraves } from '../graves.jsx';
 import { supabase } from '../supabaseClient.js';
-import { photoForName, mapImage } from '../data.js';
-import { addCustomRoutes } from '../routing.js';
+import { photoForName, mapImage, graveSection } from '../data.js';
+import { addCustomRoutes, ROUTES } from '../routing.js';
 import { PageHero, EmptyState, useToast } from '../ui.jsx';
 
 const PAGE_SIZE = 8;
 const EMPTY_FORM = { name: '', section: '', birthdate: '', dod: '', x: '50%', y: '50%' };
+
+// Convert a stored free-text date (e.g. "January 15, 1940") to YYYY-MM-DD
+// for the date picker; returns '' when it can't be parsed.
+const toISODate = (str) => {
+  if (!str) return '';
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+};
+
+// Convert a picker value (YYYY-MM-DD) back to a stored "Month D, YYYY" string.
+const fromISODate = (iso) => {
+  if (!iso) return '';
+  const d = new Date(`${iso}T00:00:00`);
+  return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+};
 
 export default function Admin() {
   const { isAdmin, isSignedIn, adminEmail, logout } = useAuth();
@@ -49,36 +64,22 @@ function Dashboard({ email, onLogout }) {
   const [deleting, setDeleting] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
-  // Walking-route waypoints collected in the Add form, same mechanism
-  // ("Add Route" tracer) as the Find a Grave page.
+  // Walking-route waypoints for the grave currently being edited or added.
   const [routePts, setRoutePts] = useState([]);
 
-  // Account approvals (admin_requests queue). Approving inserts the email
-  // into public.admins; the login check matches on email.
-  const [requests, setRequests] = useState([]);
-  const [manualEmail, setManualEmail] = useState('');
-
-  const loadRequests = async () => {
-    if (!supabase) return;
-    const { data } = await supabase.from('admin_requests').select('*').order('created_at', { ascending: false });
-    if (data) setRequests(data);
-  };
-
-  useEffect(() => { loadRequests(); }, []);
-
-  const sections = useMemo(() => ['All', ...new Set(places.map((p) => p.section).filter(Boolean))], [places]);
+  const sections = useMemo(() => ['All', ...new Set(places.map((p) => graveSection(p)).filter(Boolean))], [places]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     let list = places.filter(
       (p) =>
         (!q || p.name.toLowerCase().includes(q)) &&
-        (section === 'All' || p.section === section)
+        (section === 'All' || graveSection(p) === section)
     );
     const by = {
       'name-asc': (a, b) => a.name.localeCompare(b.name),
       'name-desc': (a, b) => b.name.localeCompare(a.name),
-      'section': (a, b) => String(a.section).localeCompare(String(b.section)),
+      'section': (a, b) => String(graveSection(a)).localeCompare(String(graveSection(b))),
       'newest': (a, b) => Number(b.id) - Number(a.id),
     }[sort];
     return [...list].sort(by);
@@ -91,7 +92,11 @@ function Dashboard({ email, onLogout }) {
   const openAdd = () => { setForm(EMPTY_FORM); setRoutePts([]); setShowAdd(true); };
   const openEdit = (p) => {
     setEditing(p);
-    setForm({ name: p.name || '', section: p.section || '', birthdate: p.birthdate || '', dod: p.dod || '', x: p.x || '50%', y: p.y || '50%' });
+    setForm({ name: p.name || '', section: graveSection(p) === '—' ? '' : graveSection(p), birthdate: toISODate(p.birthdate), dod: toISODate(p.dod), x: p.x || '50%', y: p.y || '50%' });
+    // Pre-load the grave's existing walking route, if one is saved.
+    const key = String(p.name || '').toLowerCase().replace(/[^a-z]/g, '');
+    const existing = ROUTES.find((r) => String(r.grave || '').toLowerCase().replace(/[^a-z]/g, '') === key);
+    setRoutePts(existing?.waypoints ? existing.waypoints.map((w) => ({ x: +w.x, y: +w.y })) : []);
   };
 
   const submitAdd = async (e) => {
@@ -101,24 +106,21 @@ function Dashboard({ email, onLogout }) {
       return;
     }
     setBusy(true);
-    const res = await addGrave({ name: form.name.trim(), section: form.section.trim(), level: 1, birthdate: form.birthdate.trim() || null, dod: form.dod.trim() || null, x: form.x || '50%', y: form.y || '50%' });
+    // Register the traced route first so the new pin can snap to its end point.
+    const grave = form.name.trim();
+    const hasRoute = routePts.length >= 2;
+    if (hasRoute) addCustomRoutes([{ grave, entrance: 'entranceMain', waypoints: routePts }]);
+    const res = await addGrave({ name: form.name.trim(), section: form.section.trim(), level: 1, birthdate: form.birthdate ? fromISODate(form.birthdate) : null, dod: form.dod ? fromISODate(form.dod) : null, x: form.x || '50%', y: form.y || '50%' });
     setBusy(false);
     if (!res.ok) { toast.error('Database error: ' + res.error); return; }
-    // Keep any traced waypoints: persist as a custom route for this grave,
-    // exactly like the "Add Route" tracer on the Find a Grave page.
-    if (routePts.length >= 2) {
-      const grave = form.name.trim();
-      if (supabase) {
-        const { error } = await supabase
-          .from('custom_routes')
-          .upsert({ grave, waypoints: routePts, entrance: 'entranceMain' }, { onConflict: 'grave' });
-        if (error) toast.error('Grave added, but route save failed: ' + error.message);
-      }
-      addCustomRoutes([{ grave, entrance: 'entranceMain', waypoints: routePts }]);
-      toast.success(`${grave} added to Section ${form.section.trim()} with a ${routePts.length}-point route.`);
-    } else {
-      toast.success(`${form.name.trim()} added to Section ${form.section.trim()}.`);
+    // Persist any traced walking-route waypoints for the new grave.
+    if (hasRoute && supabase) {
+      const { error } = await supabase
+        .from('custom_routes')
+        .upsert({ grave, waypoints: routePts, entrance: 'entranceMain' }, { onConflict: 'grave' });
+      if (error) toast.error('Record added, but route save failed: ' + error.message);
     }
+    toast.success(`${form.name.trim()} added to Section ${form.section.trim()}.`);
     setShowAdd(false);
     setRoutePts([]);
   };
@@ -130,10 +132,22 @@ function Dashboard({ email, onLogout }) {
       return;
     }
     setBusy(true);
-    const res = await updateGrave(editing.id, { name: form.name.trim(), section: form.section.trim(), birthdate: form.birthdate.trim() || null, dod: form.dod.trim() || null, x: form.x || '50%', y: form.y || '50%' });
+    const res = await updateGrave(editing.id, { name: form.name.trim(), section: form.section.trim(), birthdate: form.birthdate ? fromISODate(form.birthdate) : null, dod: form.dod ? fromISODate(form.dod) : null, x: form.x || '50%', y: form.y || '50%' });
     setBusy(false);
     if (!res.ok) { toast.error('Database error: ' + res.error); return; }
+    // Persist any traced walking-route waypoints for this grave.
+    if (routePts.length >= 2) {
+      const grave = form.name.trim();
+      if (supabase) {
+        const { error } = await supabase
+          .from('custom_routes')
+          .upsert({ grave, waypoints: routePts, entrance: 'entranceMain' }, { onConflict: 'grave' });
+        if (error) toast.error('Record updated, but route save failed: ' + error.message);
+      }
+      addCustomRoutes([{ grave, entrance: 'entranceMain', waypoints: routePts }]);
+    }
     setEditing(null);
+    setRoutePts([]);
     toast.success('Record updated.');
   };
 
@@ -146,28 +160,58 @@ function Dashboard({ email, onLogout }) {
     setDeleting(null);
   };
 
-  const approveRequest = async (email) => {
-    if (!supabase) { toast.error('Database not connected.'); return; }
-    const clean = String(email || '').trim();
-    if (!clean) return;
-    const { error: insErr } = await supabase.from('admins').insert({ email: clean });
-    if (insErr && insErr.code !== '23505') {
-      toast.error('Approve failed: ' + insErr.message);
-      return;
-    }
-    await supabase.from('admin_requests').delete().eq('email', clean);
-    toast.success(`${clean} approved as admin.`);
-    loadRequests();
-  };
-
-  const declineRequest = async (email) => {
-    if (!supabase) return;
-    await supabase.from('admin_requests').delete().eq('email', email);
-    toast.success(`${email} declined.`);
-    loadRequests();
-  };
-
   const newest = places.length ? [...places].sort((a, b) => Number(b.id) - Number(a.id))[0] : null;
+
+  const downloadFile = (filename, content, type = 'text/csv;charset=utf-8') => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+  const exportCsv = () => {
+    const header = ['Name', 'Section', 'Born', 'Passed away', 'Map X', 'Map Y'];
+    const lines = rows.map((p) => [csvEscape(p.name), csvEscape(graveSection(p)), csvEscape(p.birthdate), csvEscape(p.dod), csvEscape(p.x), csvEscape(p.y)].join(','));
+    downloadFile(`grave-records-${new Date().toISOString().slice(0, 10)}.csv`, [header.join(','), ...lines].join('\n'));
+    toast.success(`${rows.length} record${rows.length === 1 ? '' : 's'} exported.`);
+  };
+
+  const exportSectionSummary = () => {
+    const counts = {};
+    for (const p of places) counts[graveSection(p)] = (counts[graveSection(p)] || 0) + 1;
+    const lines = Object.entries(counts).sort((a, b) => a[0].localeCompare(b[0])).map(([s, n]) => `${csvEscape(s)},${n}`);
+    downloadFile(`section-summary-${new Date().toISOString().slice(0, 10)}.csv`, ['Section,Total graves', ...lines].join('\n'));
+    toast.success('Section summary exported.');
+  };
+
+  const printReport = () => {
+    const w = window.open('', '_blank');
+    if (!w) { toast.error('Popup blocked — allow popups to print.'); return; }
+    const counts = {};
+    for (const p of places) counts[graveSection(p)] = (counts[graveSection(p)] || 0) + 1;
+    w.document.write(`<!doctype html><html><head><title>Cemetery Records Report</title>
+      <style>body{font-family:Georgia,serif;padding:32px;color:#222}h1{margin-bottom:4px}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:13px}th{background:#0f2a20;color:#fff}</style></head><body>
+      <h1>Agnipa Memorial Park — Records Report</h1>
+      <p>Generated ${new Date().toLocaleString()} · Signed in as ${email}</p>
+      <h2>Summary</h2>
+      <p>Total records: <b>${places.length}</b> · Sections: <b>${Object.keys(counts).length}</b></p>
+      <table><thead><tr><th>Section</th><th>Total graves</th></tr></thead><tbody>
+      ${Object.entries(counts).sort((a, b) => a[0].localeCompare(b[0])).map(([s, n]) => `<tr><td>${s}</td><td>${n}</td></tr>`).join('')}
+      </tbody></table>
+      <h2>Records (current view — ${rows.length})</h2>
+      <table><thead><tr><th>Name</th><th>Section</th><th>Born</th><th>Passed</th></tr></thead><tbody>
+      ${rows.map((p) => `<tr><td>${p.name}</td><td>${graveSection(p)}</td><td>${p.birthdate || '—'}</td><td>${p.dod || '—'}</td></tr>`).join('')}
+      </tbody></table>
+      <script>window.print();</script></body></html>`);
+    w.document.close();
+  };
 
   return (
     <>
@@ -182,43 +226,20 @@ function Dashboard({ email, onLogout }) {
             <div className="card"><div className="kicker">Total records</div><div className="serif" style={{ fontSize: 36 }}>{places.length}</div></div>
             <div className="card"><div className="kicker">Sections</div><div className="serif" style={{ fontSize: 36 }}>{sections.length - 1}</div></div>
             <div className="card"><div className="kicker">Database</div><div className="serif" style={{ fontSize: 24 }}><span className={`status-dot ${databaseConnected ? 'on' : 'off'}`} />{databaseConnected ? 'Connected' : 'Local mode'}</div></div>
-            <div className="card"><div className="kicker">Latest entry</div><div style={{ fontWeight: 700 }}>{newest ? newest.name : '—'}</div><div style={{ color: 'var(--muted)', fontSize: 13 }}>{newest ? `Section ${newest.section}` : ''}</div></div>
+            <div className="card"><div className="kicker">Latest entry</div><div style={{ fontWeight: 700 }}>{newest ? newest.name : '—'}</div><div style={{ color: 'var(--muted)', fontSize: 13 }}>{newest ? `Section ${graveSection(newest)}` : ''}</div></div>
           </div>
 
           <div className="card" style={{ marginBottom: 22 }}>
-            <div className="kicker">Account approvals</div>
-            <h3 className="serif" style={{ margin: '4px 0 12px' }}>
-              Pending requests ({requests.length})
-            </h3>
-            {requests.length === 0 ? (
-              <p style={{ color: 'var(--muted)', fontSize: 14, margin: 0 }}>No pending requests.</p>
-            ) : (
-              requests.map((r) => (
-                <div key={r.email} className="list-item">
-                  <span style={{ flex: 1, fontSize: 14 }}>
-                    <b>{r.email}</b><br />
-                    <span style={{ color: 'var(--muted)' }}>
-                      {r.created_at ? new Date(r.created_at).toLocaleString() : ''}
-                    </span>
-                  </span>
-                  <button className="btn btn-green btn-sm" onClick={() => approveRequest(r.email)} style={{ marginRight: 6 }}>Approve</button>
-                  <button className="btn btn-red btn-sm" onClick={() => declineRequest(r.email)}>Decline</button>
-                </div>
-              ))
-            )}
-            <form
-              onSubmit={(e) => { e.preventDefault(); approveRequest(manualEmail); setManualEmail(''); }}
-              style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}
-            >
-              <input
-                className="input"
-                style={{ flex: '1 1 220px' }}
-                value={manualEmail}
-                onChange={(e) => setManualEmail(e.target.value)}
-                placeholder="Approve an email directly…"
-              />
-              <button className="btn btn-accent btn-sm" type="submit">Approve email</button>
-            </form>
+            <div className="kicker">Reports</div>
+            <h3 className="serif" style={{ margin: '4px 0 12px' }}>Generate reports</h3>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-green btn-sm" onClick={exportCsv}>⬇ Export CSV (current view)</button>
+              <button className="btn btn-light btn-sm" onClick={exportSectionSummary}>⬇ Section summary (CSV)</button>
+              <button className="btn btn-accent btn-sm" onClick={printReport}>🖨 Print report</button>
+            </div>
+            <p style={{ color: 'var(--muted)', fontSize: 13, margin: '10px 0 0' }}>
+              Exports use the current search/section filters.
+            </p>
           </div>
 
           <div className="toolbar-row">            <input className="input" style={{ maxWidth: 280 }} value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} placeholder="Search by name…" />            <select className="select" style={{ maxWidth: 180 }} value={section} onChange={(e) => { setSection(e.target.value); setPage(1); }}>
@@ -254,7 +275,7 @@ function Dashboard({ email, onLogout }) {
                       <tr key={p.id}>
                         <td>{photoForName(p.name) ? <img className="row-thumb" src={photoForName(p.name)} alt="" /> : <span>✝</span>}</td>
                         <td><b>{p.name}</b></td>
-                        <td><span className="pill">{p.section}</span></td>
+                        <td><span className="pill">{graveSection(p)}</span></td>
                         <td>{p.birthdate || '—'}</td>
                         <td>{p.dod || '—'}</td>
                         <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -280,17 +301,18 @@ function Dashboard({ email, onLogout }) {
       {showAdd && (
         <Modal title="Add grave record" onClose={() => { setShowAdd(false); setRoutePts([]); }}>
           <RecordForm form={form} setForm={setForm} onSubmit={submitAdd} busy={busy} submitLabel="Add Grave" onCancel={() => { setShowAdd(false); setRoutePts([]); }} />
-          <RouteTracer points={routePts} onChange={setRoutePts} />
+          <RouteTracer points={routePts} onChange={setRoutePts} label="Add route (optional)" />
         </Modal>
       )}
       {editing && (
-        <Modal title={`Edit — ${editing.name}`} onClose={() => setEditing(null)}>
-          <RecordForm form={form} setForm={setForm} onSubmit={submitEdit} busy={busy} submitLabel="Save Changes" onCancel={() => setEditing(null)} />
+        <Modal title={`Edit — ${editing.name}`} onClose={() => { setEditing(null); setRoutePts([]); }}>
+          <RecordForm form={form} setForm={setForm} onSubmit={submitEdit} busy={busy} submitLabel="Save Changes" onCancel={() => { setEditing(null); setRoutePts([]); }} />
+          <RouteTracer points={routePts} onChange={setRoutePts} label="Edit route" />
         </Modal>
       )}
       {deleting && (
         <Modal title="Remove this record?" onClose={() => setDeleting(null)}>
-          <p>Permanently remove <b>{deleting.name}</b> (Section {deleting.section}) from the registry? This cannot be undone.</p>
+          <p>Permanently remove <b>{deleting.name}</b> (Section {graveSection(deleting)}) from the registry? This cannot be undone.</p>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
             <button className="btn btn-light" onClick={() => setDeleting(null)}>Cancel</button>
             <button className="btn btn-red" disabled={busy} onClick={confirmDelete}>{busy ? 'Removing…' : 'Yes, Remove'}</button>
@@ -301,7 +323,7 @@ function Dashboard({ email, onLogout }) {
   );
 }
 
-function RouteTracer({ points, onChange }) {
+function RouteTracer({ points, onChange, label = 'Add route (optional)' }) {
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [locked, setLocked] = useState(false);
@@ -340,7 +362,7 @@ function RouteTracer({ points, onChange }) {
 
   return (
     <div style={{ marginTop: 18, borderTop: '1px solid var(--line, #e5dfc9)', paddingTop: 14 }}>
-      <label className="field">Add route (optional) — tap the map in walking order from the Main Entrance</label>
+      <label className="field">{label} — tap the map in walking order from the Main Entrance</label>
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
         <button type="button" className="btn btn-light btn-sm" onClick={() => setZoom((z) => Math.min(2.6, +(z + 0.2).toFixed(2)))}>+</button>
         <button type="button" className="btn btn-light btn-sm" onClick={() => setZoom((z) => Math.max(1, +(z - 0.2).toFixed(2)))}>−</button>
@@ -401,23 +423,15 @@ function RecordForm({ form, setForm, onSubmit, busy, submitLabel, onCancel }) {
         </div>
         <div>
           <label className="field">Section *</label>
-          <input className="input" value={form.section} onChange={set('section')} placeholder="A1" />
+          <input className="input" value={form.section} onChange={set('section')} placeholder="S1" />
         </div>
         <div>
           <label className="field">Birthdate</label>
-          <input className="input" value={form.birthdate} onChange={set('birthdate')} placeholder="January 15, 1940" />
+          <input className="input" type="date" value={form.birthdate} onChange={set('birthdate')} />
         </div>
         <div>
           <label className="field">Date of death</label>
-          <input className="input" value={form.dod} onChange={set('dod')} placeholder="February 10, 2020" />
-        </div>
-        <div>
-          <label className="field">Map X (%)</label>
-          <input className="input" value={form.x} onChange={set('x')} placeholder="65%" />
-        </div>
-        <div>
-          <label className="field">Map Y (%)</label>
-          <input className="input" value={form.y} onChange={set('y')} placeholder="13%" />
+          <input className="input" type="date" value={form.dod} onChange={set('dod')} />
         </div>
       </div>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>

@@ -4,7 +4,7 @@ import { useAuth } from '../auth.jsx';
 import { useToast } from '../ui.jsx';
 import { isSupabaseConfigured } from '../supabaseClient.js';
 
-// Standalone login page for staff only. Regular visitors use /login.
+// Standalone login page for staff only.
 // After a successful admin login the user is sent to ?next= (default '/admin').
 export default function AdminLogin() {
   const { isAdmin, isSignedIn, loginAdmin, authError } = useAuth();
@@ -76,7 +76,7 @@ export default function AdminLogin() {
           </button>
         </form>
         <p style={{ textAlign: 'center', marginTop: 16 }}>
-          <Link to="/login" className="btn btn-light" style={{ width: '100%' }}>Back to user login</Link>
+          <Link to="/" className="btn btn-light" style={{ width: '100%' }}>Continue to public site</Link>
         </p>
       </div>
     </div>

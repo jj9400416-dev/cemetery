@@ -16,18 +16,15 @@ create policy "Anyone can view graves"
   on public.graves for select
   using (true);
 
-create policy "Authenticated admins can add graves"
+create policy "Anyone can add graves"
   on public.graves for insert
-  to authenticated
   with check (true);
 
-create policy "Authenticated admins can update graves"
+create policy "Anyone can update graves"
   on public.graves for update
-  to authenticated
   using (true)
   with check (true);
 
-create policy "Authenticated admins can remove graves"
+create policy "Anyone can remove graves"
   on public.graves for delete
-  to authenticated
   using (true);

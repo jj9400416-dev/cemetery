@@ -2,10 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useGraves } from '../graves.jsx';
 import { useAuth } from '../auth.jsx';
-import { supabase } from '../supabaseClient.js';
 import { useToast, EmptyState } from '../ui.jsx';
-import { photoForName, mapImage, INITIAL_CEMETERY_FEATURES, INITIAL_MAP_SECTIONS } from '../data.js';
-import { getRoute, addCustomRoutes } from '../routing.js';
+import { photoForName, mapImage, INITIAL_CEMETERY_FEATURES, INITIAL_MAP_SECTIONS, graveSection } from '../data.js';
+import { getRoute } from '../routing.js';
 
 const parsePercent = (v) => parseFloat(String(v).replace('%', '')) || 0;
 const toPt = (p) => (p?.x == null || p?.y == null ? null : { x: parsePercent(p.x), y: parsePercent(p.y) });
@@ -36,18 +35,12 @@ export default function FindGrave() {
   // Contribute mode (signed-in users): fill the form, tap the map to place
   // the pin, submit. The walking route is auto-computed from the walkways.
   const [placing, setPlacing] = useState(false);
+  const [showLegend, setShowLegend] = useState(false);
   const [pendingPt, setPendingPt] = useState(null);
   const [newName, setNewName] = useState('');
   const [newSection, setNewSection] = useState('');
   const [newBirth, setNewBirth] = useState('');
   const [newDod, setNewDod] = useState('');
-  // Add-route tracer (approved accounts): pick a grave, tap waypoints in
-  // walking order, save. Saved routes win over bundled extractions.
-  const [tracing, setTracing] = useState(false);
-  const [routePts, setRoutePts] = useState([]);
-  const [routeGrave, setRouteGrave] = useState('');
-  const [routeName, setRouteName] = useState(''); // custom name not in the database
-  const [customRev, setCustomRev] = useState(0);
   const dragRef = useRef({ dragging: false, sx: 0, sy: 0, ox: 0, oy: 0 });
   const movedRef = useRef(false);
   const mapCardRef = useRef(null);
@@ -62,7 +55,7 @@ export default function FindGrave() {
   }, []);
 
   const sections = useMemo(
-    () => ['All', ...new Set(places.map((p) => p.section).filter(Boolean))],
+    () => ['All', ...new Set(places.map((p) => graveSection(p)).filter(Boolean))],
     [places]
   );
 
@@ -70,10 +63,17 @@ export default function FindGrave() {
     const q = searchText.trim().toLowerCase();
     return places.filter((p) => {
       const matchName = !q || p.name.toLowerCase().includes(q);
-      const matchSection = sectionFilter === 'All' || p.section === sectionFilter;
+      const matchSection = sectionFilter === 'All' || graveSection(p) === sectionFilter;
       return matchName && matchSection;
     });
   }, [searchText, places, sectionFilter]);
+
+  // Typing a new name clears any previously selected grave so the search
+  // result (and its section) drives the highlight.
+  useEffect(() => {
+    setActiveId(null);
+    setRouteId(null);
+  }, [searchText]);
 
   // Only auto-select the first match when the visitor is actually searching.
   // Otherwise (fresh "Open Cemetery Map") nothing is preselected, so Juan
@@ -85,17 +85,36 @@ export default function FindGrave() {
   const routeTarget = places.find((p) => String(p.id) === String(routeId)) || null;
   const routeAnchor = routeTarget || activePlace;
 
-  const activeSectionId = activePlace?.section || null;
+  const activeSectionId = activePlace ? graveSection(activePlace) : null;
+  // While searching, highlight only the section(s) the matching grave(s)
+  // belong to; every other section is dimmed. With no search, fall back to
+  // the explicitly filtered section or the selected grave's section.
+  const hasNameQuery = searchText.trim() !== '';
+  const matchedSectionIds = useMemo(
+    () => new Set(filteredPlaces.map((p) => graveSection(p)).filter(Boolean)),
+    [filteredPlaces]
+  );
+  const focusSections = activeId != null && activeSectionId
+    ? new Set([activeSectionId])
+    : sectionFilter !== 'All'
+      ? new Set([sectionFilter])
+      : hasNameQuery
+        ? matchedSectionIds
+        : new Set();
+  const shouldFocus = activeId != null || sectionFilter !== 'All' || hasNameQuery;
   const routeOrigin = INITIAL_CEMETERY_FEATURES.find((f) => f.id === 'entranceMain');
   const route = useMemo(
     () => getRoute(routeAnchor?.name, toPt(routeAnchor), toPt(routeOrigin)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [routeAnchor?.name, routeAnchor?.x, routeAnchor?.y, routeOrigin?.x, routeOrigin?.y, customRev]
+    [routeAnchor?.name, routeAnchor?.x, routeAnchor?.y, routeOrigin?.x, routeOrigin?.y]
   );
   const routePoints = route?.points || [];
 
   const searchActive = searchText.trim() !== '' || sectionFilter !== 'All';
-  const invScale = 1 / (mapZoom || 1);
+  // Pins shrink relative to the map as you zoom in, but never at full strength:
+  // the square-root curve keeps them growing on screen so they stay easy to
+  // grab while the map enlarges. 1.0x at 1x zoom, ~1.61x at 2.6x zoom.
+  const pinScale = +(1 / Math.sqrt(mapZoom || 1)).toFixed(3);
 
   const selectPlace = (p) => {
     setActiveId(p.id);
@@ -162,11 +181,6 @@ export default function FindGrave() {
     if (placing) {
       const pt = framePoint(e);
       if (pt) setPendingPt(pt);
-      return;
-    }
-    if (tracing) {
-      const pt = framePoint(e);
-      if (pt) setRoutePts((prev) => [...prev, pt]);
     }
   };
 
@@ -201,33 +215,6 @@ export default function FindGrave() {
     setPendingPt(null);
     setPlacing(false);
     toast.success(`${savedName} added — search the name to see its walking route.`);
-  };
-
-  const saveRoute = async (e) => {
-    e?.preventDefault();
-    const gname = routeName.trim() || routeGrave || activePlace?.name || '';
-    if (!gname) {
-      toast.error('Select a grave or type a name first.');
-      return;
-    }
-    if (routePts.length < 2) {
-      toast.error('Tap at least 2 points on the map, from the entrance to the grave.');
-      return;
-    }
-    if (supabase) {
-      const { error } = await supabase
-        .from('custom_routes')
-        .upsert({ grave: gname, waypoints: routePts, entrance: 'entranceMain' }, { onConflict: 'grave' });
-      if (error) {
-        toast.error('Could not save: ' + error.message);
-        return;
-      }
-    }
-    addCustomRoutes([{ grave: gname, entrance: 'entranceMain', waypoints: routePts }]);
-    setCustomRev((v) => v + 1);
-    setRoutePts([]);
-    setTracing(false);
-    toast.success(`Route saved for ${gname} — search the name to walk it.`);
   };
 
   return (
@@ -280,12 +267,12 @@ export default function FindGrave() {
               onMouseUp={onMouseUp}
               onMouseLeave={onMouseUp}
               onClick={onMapClick}
-              style={(placing || tracing) ? { cursor: 'crosshair' } : undefined}
+              style={placing ? { cursor: 'crosshair' } : undefined}
             >
               <div className="map-inner">
                 <div
                   className="map-frame"
-                  style={{ transform: `scale(${mapZoom}) translate(${mapOffset.x / mapZoom}px, ${mapOffset.y / mapZoom}px)` }}
+                  style={{ transform: `scale(${mapZoom}) translate(${mapOffset.x / mapZoom}px, ${mapOffset.y / mapZoom}px)`, '--pin-scale': pinScale }}
                 >
                 <img className="base" src={mapImage} alt="Cemetery map" draggable={false} />
 
@@ -294,14 +281,13 @@ export default function FindGrave() {
                   <svg className="section-layer" viewBox="0 0 100 100" preserveAspectRatio="none">
                   {INITIAL_MAP_SECTIONS.map((s) => {
                     if (!s.points) return null;
-                    const isSelected = sectionFilter !== 'All' && sectionFilter === s.id;
-                    const isActive = s.id === activeSectionId;
-                    const isDimmed = sectionFilter !== 'All' && !isSelected;
+                    const isActive = focusSections.has(s.id);
+                    const isDimmed = shouldFocus && !isActive;
                     return (
                       <polygon
                         key={s.id}
                         points={s.points.map((p) => p.join(',')).join(' ')}
-                        className={`section-poly${isActive || isSelected ? ' active' : ''}${isDimmed ? ' dimmed' : ''}`}
+                        className={`section-poly${isActive ? ' active' : ''}${isDimmed ? ' dimmed' : ''}`}
                       />
                     );
                   })}
@@ -314,7 +300,7 @@ export default function FindGrave() {
                     const ys = s.points.map((p) => p[1]);
                     const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
                     const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
-                    const isDimmed = sectionFilter !== 'All' && sectionFilter !== s.id;
+                    const isDimmed = shouldFocus && !focusSections.has(s.id);
                     return (
                       <div key={s.id} className={`section-label${isDimmed ? ' dimmed' : ''}`} style={{ left: `${cx}%`, top: `${cy}%` }}>
                         {s.label}
@@ -337,7 +323,7 @@ export default function FindGrave() {
                       key={p.id}
                       title={p.name}
                       className={`marker-pin${isSelected ? ' selected' : ''}`}
-                      style={{ left: `${toAgnipaX(p.x)}%`, top: `${toAgnipaY(p.y)}%`, transform: `translate(-50%, -100%) scale(${invScale})`, transformOrigin: '50% 100%' }}
+                      style={{ left: `${toAgnipaX(p.x)}%`, top: `${toAgnipaY(p.y)}%` }}
                       onClick={(e) => { e.stopPropagation(); selectPlace(p); }}
                     >
                       <svg viewBox="0 0 24 34" aria-hidden="true">
@@ -356,12 +342,12 @@ export default function FindGrave() {
                   )}
                 </svg>
                 {searchActive && INITIAL_CEMETERY_FEATURES.map((f) => (
-                  <div key={f.id} className="marker entrance" style={{ left: `${toAgnipaX(f.x)}%`, top: `${toAgnipaY(f.y)}%`, transform: `translate(-50%, -50%) scale(${invScale})` }} title={f.label}>⌂</div>
+                  <div key={f.id} className="marker entrance" style={{ left: `${toAgnipaX(f.x)}%`, top: `${toAgnipaY(f.y)}%` }} title={f.label}>⌂</div>
                 ))}
                 {pendingPt && (
                   <span
                     className="marker-pin selected"
-                    style={{ left: `${toAgnipaX(pendingPt.x)}%`, top: `${toAgnipaY(pendingPt.y)}%`, transform: `translate(-50%, -100%) scale(${invScale})`, transformOrigin: '50% 100%' }}
+                    style={{ left: `${toAgnipaX(pendingPt.x)}%`, top: `${toAgnipaY(pendingPt.y)}%` }}
                     title="New grave location"
                   >
                     <svg viewBox="0 0 24 34" aria-hidden="true">
@@ -370,33 +356,17 @@ export default function FindGrave() {
                     </svg>
                   </span>
                 )}
-                {tracing && routePts.length > 0 && (
-                  <svg className="route-layer" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <polyline
-                      points={routePts.map((p) => `${toAgnipaX(p.x)},${toAgnipaY(p.y)}`).join(' ')}
-                      vectorEffect="non-scaling-stroke"
-                      style={{ stroke: '#ffd23e', strokeWidth: 2, strokeDasharray: '3 2', opacity: 0.95 }}
-                    />
-                  </svg>
-                )}
-                {tracing && routePts.map((p, i) => (
-                  <span
-                    key={`wp-${i}`}
-                    title={`Waypoint ${i + 1}`}
-                    style={{
-                      position: 'absolute', left: `${toAgnipaX(p.x)}%`, top: `${toAgnipaY(p.y)}%`,
-                      width: 12, height: 12, borderRadius: '50%', background: '#ffd23e',
-                      border: '2px solid #0f2a20', transform: 'translate(-50%, -50%)', zIndex: 6,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 8, fontWeight: 800, color: '#0f2a20',
-                    }}
-                  >
-                    {i + 1}
-                  </span>
-                ))}
                 </div>
               </div>
             </div>
+            <button
+              className="legend-toggle"
+              onClick={() => setShowLegend((v) => !v)}
+              aria-pressed={showLegend}
+            >
+              {showLegend ? '✕ Hide Legend' : '🗺️ Legend'}
+            </button>
+            {showLegend && (
             <div className="map-legend" aria-label="Map legend">
               <span className="lg-title">Legend</span>
               <span className="lg-item">
@@ -414,6 +384,7 @@ export default function FindGrave() {
               </span>
               <span className="lg-item"><span className="lg-door">⌂</span> Entrance</span>
             </div>
+            )}
             <div className="map-status">
               {searchActive
                 ? filteredPlaces.length === 0
@@ -428,14 +399,14 @@ export default function FindGrave() {
           <div className="detail-card">
             {activePlace ? (
               <div className="card">
-                <span className="pill">Section {activePlace.section || '—'}</span>
+                <span className="pill">Section {activePlace ? graveSection(activePlace) : '—'}</span>
                 <h3 className="serif" style={{ margin: '0 0 10px', fontSize: 26 }}>{activePlace.name}</h3>
                 {photoForName(activePlace.name) && (
                   <img className="hero-photo" src={photoForName(activePlace.name)} alt={activePlace.name} />
                 )}
                 <div className="fact"><span>Born</span><span>{activePlace.birthdate || 'N/A'}</span></div>
                 <div className="fact"><span>Passed away</span><span>{activePlace.dod || 'N/A'}</span></div>
-                <div className="fact" style={{ borderBottom: 0 }}><span>Section</span><span>{activePlace.section || 'N/A'}</span></div>
+                <div className="fact" style={{ borderBottom: 0 }}><span>Section</span><span>{activePlace ? graveSection(activePlace) : 'N/A'}</span></div>
                 <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
                   <button className="btn btn-accent btn-sm" onClick={() => showRoute(activePlace)}>
                     Show Route
@@ -462,7 +433,7 @@ export default function FindGrave() {
                   {filteredPlaces.slice(0, 30).map((p) => (
                     <div key={p.id} className="list-item">
                       {photoForName(p.name) && <img src={photoForName(p.name)} alt="" className="list-thumb" />}
-                      <span style={{ flex: 1, fontSize: 14 }}><b>{p.name}</b><br /><span style={{ color: 'var(--muted)' }}>Section {p.section}</span></span>
+                      <span style={{ flex: 1, fontSize: 14 }}><b>{p.name}</b><br /><span style={{ color: 'var(--muted)' }}>Section {graveSection(p)}</span></span>
                       <button className="btn btn-accent btn-sm" onClick={() => selectPlace(p)}>View</button>
                     </div>
                   ))}
@@ -520,66 +491,6 @@ export default function FindGrave() {
                     Add grave
                   </button>
                 </form>
-              </div>
-            )}
-            {!loading && !isSignedIn && (
-              <div className="card" style={{ marginTop: 18, textAlign: 'center' }}>
-                <p style={{ margin: 0, fontSize: 14 }}>
-                  Know a grave that's missing? <Link to="/signup">Create a free account</Link> to add it to the map.
-                </p>
-              </div>
-            )}
-            {!loading && (
-              <div className="card" style={{ marginTop: 18 }}>
-                <span className="pill">Walking routes</span>
-                <h3 className="serif" style={{ margin: '6px 0 10px' }}>Add Route</h3>
-                {isSignedIn ? (
-                  <form onSubmit={saveRoute}>
-                    <p style={{ color: 'var(--muted)', fontSize: 14, margin: '0 0 12px' }}>
-                      Pick a grave, trace its path from the Main Entrance by tapping the map in order, then save. Saved routes replace the default one.
-                    </p>
-                    <label className="field">Grave *</label>
-                    <select className="input" value={routeGrave} onChange={(e) => setRouteGrave(e.target.value)} style={{ width: '100%' }}>
-                      <option value="">{activePlace ? `${activePlace.name} (selected)` : 'Select grave…'}</option>
-                      {places.map((p) => (
-                        <option key={p.id} value={p.name}>{p.name} — Section {p.section}</option>
-                      ))}
-                    </select>
-                    <label className="field" style={{ marginTop: 10 }}>Or type a name not in the database</label>
-                    <input
-                      className="input"
-                      style={{ width: '100%' }}
-                      placeholder="e.g. Maria Santos"
-                      value={routeName}
-                      onChange={(e) => setRouteName(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className={tracing ? 'btn btn-red btn-sm' : 'btn btn-light btn-sm'}
-                      onClick={() => setTracing((v) => !v)}
-                      style={{ width: '100%', marginTop: 12 }}
-                    >
-                      {tracing ? '✕ Stop tracing' : 'Start tracing'}
-                    </button>
-                    {routePts.length > 0 && (
-                      <p style={{ fontSize: 13, color: 'var(--muted)', margin: '8px 0 0' }}>
-                        {routePts.length} waypoint{routePts.length === 1 ? '' : 's'} — keep tapping, or save.
-                      </p>
-                    )}
-                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                      <button type="button" className="btn btn-light btn-sm" onClick={() => setRoutePts([])} style={{ flex: 1 }}>
-                        Clear points
-                      </button>
-                      <button className="btn btn-green btn-sm" type="submit" style={{ flex: 2 }}>
-                        Save route
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <p style={{ margin: 0, fontSize: 14 }}>
-                    You must create an account to add routes. <Link to="/signup">Create a free account</Link> — approval is instant.
-                  </p>
-                )}
               </div>
             )}
           </div>

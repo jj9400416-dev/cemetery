@@ -55,31 +55,6 @@ export function AuthProvider({ children }) {
     return { ok: false, error: msg };
   };
 
-  const loginUser = async (email, password) => {
-    setAuthError('');
-    const trimmedEmail = email.trim();
-    const trimmedPassword = password.trim();
-    if (supabase) {
-      const { data, error } = await supabase.auth.signInWithPassword({ email: trimmedEmail, password: trimmedPassword });
-      if (error) {
-        setAuthError(error.message);
-        return { ok: false, error: error.message };
-      }
-      const userEmail = data?.user?.email;
-      const { data: adminRow, error: adminErr } = userEmail
-        ? await supabase.from('admins').select('email').eq('email', userEmail).maybeSingle()
-        : { data: null, error: { message: 'missing email' } };
-      const isAdminUser = !adminErr && adminRow;
-      setIsSignedIn(true);
-      setIsAdmin(isAdminUser);
-      setAdminEmail(isAdminUser ? trimmedEmail : '');
-      return { ok: true, admin: isAdminUser };
-    }
-    const msg = 'Supabase is not configured.';
-    setAuthError(msg);
-    return { ok: false, error: msg };
-  };
-
   const logout = async () => {
     if (supabase) await supabase.auth.signOut();
     setIsSignedIn(false);
@@ -88,7 +63,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ isAdmin, isSignedIn, adminEmail, authError, loginAdmin, loginUser, logout }}>
+    <AuthContext.Provider value={{ isAdmin, isSignedIn, adminEmail, authError, loginAdmin, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -72,6 +72,9 @@ img { max-width: 100%; }
   .hamburger { display: block; }
   .navbar-inner .nav-cta-desktop { display: none; }
 }
+@media (min-width: 861px) {
+  .admin-login-burger { display: none !important; }
+}
 
 /* ---------- Hero ---------- */
 .hero { position: relative; color: #fff; overflow: hidden; background: var(--pine-950); }
@@ -180,8 +183,15 @@ img { max-width: 100%; }
   background: rgba(12,31,23,.85); color: #e9e4d6; border-radius: 999px;
   font-size: 12.5px; padding: 7px 14px; border: 1px solid rgba(201,162,39,.4);
 }
+.legend-toggle {
+  position: absolute; bottom: 12px; right: 12px; z-index: 7;
+  background: rgba(12,31,23,.9); color: #e9e4d6; border-radius: 999px;
+  font-size: 12.5px; padding: 7px 14px; border: 1px solid rgba(201,162,39,.4);
+  cursor: pointer;
+}
+.legend-toggle:hover { background: rgba(24,48,38,.95); }
 .map-legend {
-  position: absolute; bottom: 12px; right: 12px; z-index: 6;
+  position: absolute; bottom: 52px; right: 12px; z-index: 6;
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; max-width: 55%;
   background: rgba(12,31,23,.85); color: #e9e4d6; border-radius: 12px;
   font-size: 12px; padding: 8px 12px; border: 1px solid rgba(255,255,255,.18);
@@ -260,13 +270,13 @@ img { max-width: 100%; }
 .marker.grave.selected { box-shadow: 0 0 0 3px rgba(201,162,39,.9); z-index: 4; }
 .marker-pin {
   position: absolute; width: 20px; height: 28px; padding: 0; background: none; border: 0;
-  transform: translate(-50%, -100%); transform-origin: 50% 100%; cursor: pointer; z-index: 4;
+  transform: translate(-50%, -100%) scale(var(--pin-scale, 1)); transform-origin: 50% 100%; cursor: pointer; z-index: 4;
   filter: drop-shadow(0 1px 2px rgba(0,0,0,.45));
 }
 .marker-pin svg { width: 100%; height: 100%; display: block; }
 .marker-pin.selected { width: 24px; height: 34px; z-index: 5; }
 span.marker-pin { pointer-events: none; }
-.marker.entrance { background: #e67e22; z-index: 2; }
+.marker.entrance { background: #e67e22; z-index: 2; transform: translate(-50%, -50%) scale(var(--pin-scale, 1)); }
 .route-layer {
   position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none;
 }
