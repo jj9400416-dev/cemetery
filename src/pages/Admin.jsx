@@ -2,13 +2,18 @@ import { useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { useGraves } from '../graves.jsx';
+import { useRecords } from '../records.jsx';
+import { useSurvey } from '../survey.jsx';
 import { supabase } from '../supabaseClient.js';
 import { photoForName, mapImage, graveSection } from '../data.js';
+import { SURVEY_QUESTIONS, LIKERT_OPTIONS, computeWeightedMean } from '../surveyData.js';
 import { addCustomRoutes, ROUTES } from '../routing.js';
 import { PageHero, EmptyState, useToast } from '../ui.jsx';
 
 const PAGE_SIZE = 8;
+const RECORDS_PAGE_SIZE = 12;
 const EMPTY_FORM = { name: '', section: '', birthdate: '', dod: '', x: '50%', y: '50%' };
+const EMPTY_RECORD = { name: '', dod: '', status: 'deceased', remarks: '' };
 
 // Convert a stored free-text date (e.g. "January 15, 1940") to YYYY-MM-DD
 // for the date picker; returns '' when it can't be parsed.
@@ -23,6 +28,18 @@ const fromISODate = (iso) => {
   if (!iso) return '';
   const d = new Date(`${iso}T00:00:00`);
   return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
+// Split a registry name ("SURNAME, FIRSTNAME") into its two parts.
+const splitName = (name) => {
+  const [surname, ...rest] = String(name || '').split(',');
+  return { surname: (surname || '').trim() || null, given_name: rest.join(',').trim() || null };
+};
+
+// Pull the last 4-digit year out of a free-text date, for sorting/filtering.
+const yearFromText = (text) => {
+  const m = String(text || '').match(/(?:19|20)\d{2}/g);
+  return m ? Number(m[m.length - 1]) : null;
 };
 
 export default function Admin() {
@@ -42,16 +59,578 @@ export default function Admin() {
           </p>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 8, flexWrap: 'wrap' }}>
             <Link className="btn btn-pine" to="/find">Go to map</Link>
-            <button className="btn btn-light" onClick={onLogout}>Logout</button>
+            <button className="btn btn-light" onClick={logout}>Logout</button>
           </div>
         </div>
       </div>
     );
   }
-  return <Dashboard email={adminEmail} onLogout={logout} />;
+  return <Dashboard email={adminEmail} />;
 }
 
-function Dashboard({ email, onLogout }) {
+function Dashboard({ email }) {
+  const [tab, setTab] = useState('registry');
+  const { records } = useRecords();
+  const { responses } = useSurvey();
+
+  return (
+    <>
+      <PageHero
+        eyebrow={`Signed in as ${email}`}
+        title="Records Dashboard."
+        subtitle="Search, add, correct, and organize every record kept by the park."
+      />
+      <section className="section" style={{ paddingTop: 36 }}>
+        <div className="container">
+          <div className="toolbar-row" style={{ marginBottom: 22 }}>
+            <button
+              className={tab === 'registry' ? 'btn btn-green btn-sm' : 'btn btn-light btn-sm'}
+              onClick={() => setTab('registry')}
+            >
+              📖 Registry ({records.length})
+            </button>
+            <button
+              className={tab === 'graves' ? 'btn btn-green btn-sm' : 'btn btn-light btn-sm'}
+              onClick={() => setTab('graves')}
+            >
+              🗺️ Map graves
+            </button>
+            <button
+              className={tab === 'survey' ? 'btn btn-green btn-sm' : 'btn btn-light btn-sm'}
+              onClick={() => setTab('survey')}
+            >
+              📊 Survey ({responses.length})
+            </button>
+            <span style={{ flex: 1 }} />
+          </div>
+          {tab === 'registry' ? (
+            <RegistryPanel />
+          ) : tab === 'graves' ? (
+            <GravesPanel email={email} />
+          ) : (
+            <SurveyPanel />
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+// ---- Deceased registry (public.deceased) -----------------------------------
+function RegistryPanel() {
+  const { records, loading, dbError, databaseConnected, refresh, addRecord, updateRecord, removeRecord } = useRecords();
+  const toast = useToast();
+
+  const [query, setQuery] = useState('');
+  const [view, setView] = useState('All');
+  const [sort, setSort] = useState('name-asc');
+  const [page, setPage] = useState(1);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [form, setForm] = useState(EMPTY_RECORD);
+  const [busy, setBusy] = useState(false);
+
+  const counts = useMemo(
+    () => ({
+      total: records.length,
+      deceased: records.filter((r) => r.status === 'deceased').length,
+      reserved: records.filter((r) => r.status === 'reserved').length,
+      needsVerification: records.filter((r) => r.needs_verification).length,
+    }),
+    [records]
+  );
+
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = records.filter((r) => {
+      const hay = `${r.name || ''} ${r.surname || ''} ${r.given_name || ''}`.toLowerCase();
+      const matchQ = !q || hay.includes(q);
+      const matchView =
+        view === 'All' ||
+        (view === 'needs_verification' ? !!r.needs_verification : r.status === view);
+      return matchQ && matchView;
+    });
+    const by = {
+      'name-asc': (a, b) => String(a.name || '').localeCompare(String(b.name || '')),
+      'name-desc': (a, b) => String(b.name || '').localeCompare(String(a.name || '')),
+      'year-new': (a, b) => (Number(b.dod_year) || 0) - (Number(a.dod_year) || 0),
+      'year-old': (a, b) => (Number(a.dod_year) || 0) - (Number(b.dod_year) || 0),
+      'flag': (a, b) => Number(b.needs_verification) - Number(a.needs_verification),
+    }[sort];
+    return [...list].sort(by);
+  }, [records, query, view, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / RECORDS_PAGE_SIZE));
+  const pageRows = rows.slice((page - 1) * RECORDS_PAGE_SIZE, page * RECORDS_PAGE_SIZE);
+
+  const resetFilters = () => { setQuery(''); setView('All'); setPage(1); };
+  const openAdd = () => { setForm(EMPTY_RECORD); setShowAdd(true); };
+  const openEdit = (r) => {
+    setEditing(r);
+    setForm({ name: r.name || '', dod: r.dod_raw || '', status: r.status || 'deceased', remarks: r.remarks || '' });
+  };
+
+  const buildPayload = () => {
+    const name = form.name.trim();
+    return {
+      name,
+      ...splitName(name),
+      dod_raw: form.dod.trim() || null,
+      dod_year: yearFromText(form.dod),
+      status: form.status || 'deceased',
+      remarks: form.remarks.trim() || null,
+    };
+  };
+
+  const submitAdd = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim()) { toast.error('Name is required.'); return; }
+    setBusy(true);
+    // source_file 'manual' keeps app-added rows out of the seed's idempotent wipe.
+    const res = await addRecord({ ...buildPayload(), source_file: 'manual', needs_verification: false });
+    setBusy(false);
+    if (!res.ok) { toast.error('Database error: ' + res.error); return; }
+    toast.success(`${form.name.trim()} added to the registry.`);
+    setShowAdd(false);
+  };
+
+  const submitEdit = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim()) { toast.error('Name is required.'); return; }
+    setBusy(true);
+    const res = await updateRecord(editing.id, buildPayload());
+    setBusy(false);
+    if (!res.ok) { toast.error('Database error: ' + res.error); return; }
+    setEditing(null);
+    toast.success('Record updated.');
+  };
+
+  const confirmDelete = async () => {
+    setBusy(true);
+    const res = await removeRecord(deleting.id);
+    setBusy(false);
+    if (!res.ok) { toast.error('Database error: ' + res.error); return; }
+    toast.success(`${deleting.name} removed.`);
+    setDeleting(null);
+  };
+
+  const downloadFile = (filename, content, type = 'text/csv;charset=utf-8') => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+  const exportCsv = () => {
+    const header = ['No.', 'Name', 'Surname', 'Given name', 'Date of death', 'Year', 'Status', 'Needs verification', 'Remarks'];
+    const lines = rows.map((r) =>
+      [csvEscape(r.record_no), csvEscape(r.name), csvEscape(r.surname), csvEscape(r.given_name), csvEscape(r.dod_raw), csvEscape(r.dod_year), csvEscape(r.status), csvEscape(r.needs_verification), csvEscape(r.remarks)].join(',')
+    );
+    downloadFile(`deceased-registry-${new Date().toISOString().slice(0, 10)}.csv`, [header.join(','), ...lines].join('\n'));
+    toast.success(`${rows.length} record${rows.length === 1 ? '' : 's'} exported.`);
+  };
+
+  const printReport = () => {
+    const w = window.open('', '_blank');
+    if (!w) { toast.error('Popup blocked — allow popups to print.'); return; }
+    w.document.write(`<!doctype html><html><head><title>Cemetery Registry Report</title>
+      <style>body{font-family:Georgia,serif;padding:32px;color:#222}h1{margin-bottom:4px}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:13px}th{background:#0f2a20;color:#fff}</style></head><body>
+      <h1>Agnipa Memorial Park — Deceased Registry</h1>
+      <p>Generated ${new Date().toLocaleString()}</p>
+      <p>Showing <b>${rows.length}</b> of <b>${counts.total}</b> · Deceased: <b>${counts.deceased}</b> · Reserved: <b>${counts.reserved}</b> · Needs verification: <b>${counts.needsVerification}</b></p>
+      <table><thead><tr><th>Name</th><th>Date of death</th><th>Year</th><th>Status</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td>${r.name}</td><td>${r.dod_raw || '—'}</td><td>${r.dod_year || '—'}</td><td>${r.status}</td></tr>`).join('')}
+      </tbody></table>
+      <script>window.print();</script></body></html>`);
+    w.document.close();
+  };
+
+  return (
+    <>
+      <div className="grid grid-4" style={{ marginBottom: 22 }}>
+        <div className="card"><div className="kicker">Total records</div><div className="serif" style={{ fontSize: 36 }}>{counts.total}</div></div>
+        <div className="card"><div className="kicker">Deceased</div><div className="serif" style={{ fontSize: 36 }}>{counts.deceased}</div></div>
+        <div className="card"><div className="kicker">Reserved</div><div className="serif" style={{ fontSize: 36 }}>{counts.reserved}</div></div>
+        <div className="card"><div className="kicker">Needs verification</div><div className="serif" style={{ fontSize: 36 }}>{counts.needsVerification}</div></div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 22 }}>
+        <div className="kicker">Park registry · public.deceased</div>
+        <h3 className="serif" style={{ margin: '4px 0 8px' }}>Record of the deceased</h3>
+        <p style={{ color: 'var(--muted)', fontSize: 14, margin: '0 0 12px' }}>
+          <span className={`status-dot ${databaseConnected ? 'on' : 'off'}`} />
+          {databaseConnected
+            ? `Live records from the park registry · ${counts.total} records imported from the ledger.`
+            : 'Registry offline — run supabase-deceased.sql in Supabase to load the 489 records.'}
+        </p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-green btn-sm" onClick={exportCsv}>⬇ Export CSV (current view)</button>
+          <button className="btn btn-accent btn-sm" onClick={printReport}>🖨 Print report</button>
+        </div>
+      </div>
+
+      <div className="toolbar-row">
+        <input className="input" style={{ maxWidth: 280 }} value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} placeholder="Search name…" />
+        <select className="select" style={{ maxWidth: 200 }} value={view} onChange={(e) => { setView(e.target.value); setPage(1); }}>
+          <option value="All">All records</option>
+          <option value="deceased">Deceased only</option>
+          <option value="reserved">Reserved only</option>
+          <option value="needs_verification">Needs verification</option>
+        </select>
+        <select className="select" style={{ maxWidth: 190 }} value={sort} onChange={(e) => setSort(e.target.value)}>
+          <option value="name-asc">Name A–Z</option>
+          <option value="name-desc">Name Z–A</option>
+          <option value="year-new">Year (newest)</option>
+          <option value="year-old">Year (oldest)</option>
+          <option value="flag">Needs verification first</option>
+        </select>
+        <button className="btn btn-light btn-sm" onClick={resetFilters}>Reset</button>
+        <span style={{ flex: 1 }} />
+        <button className="btn btn-light btn-sm" onClick={refresh}>↻ Refresh</button>
+        <button className="btn btn-green btn-sm" onClick={openAdd}>+ Add Record</button>
+      </div>
+
+      {dbError && <p className="error-text">Database: {dbError}</p>}
+      {loading ? (
+        <div className="skeleton" style={{ height: 320 }} />
+      ) : rows.length === 0 ? (
+        <div className="card"><EmptyState title="No records match" hint="Adjust your search, or add a new record." /></div>
+      ) : (
+        <>
+          <div className="table-wrap">
+            <table className="records">
+              <thead>
+                <tr><th></th><th>Name</th><th>Date of death</th><th>Year</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr>
+              </thead>
+              <tbody>
+                {pageRows.map((r) => (
+                  <tr key={r.id}>
+                    <td>{photoForName(r.name) ? <img className="row-thumb" src={photoForName(r.name)} alt="" /> : <span>✝</span>}</td>
+                    <td><b>{r.name}</b>{r.given_name ? <span style={{ color: 'var(--muted)' }}> · {r.given_name}</span> : null}</td>
+                    <td>
+                      {r.dod_raw || '—'}
+                      {r.needs_verification ? <span className="pill" title={r.remarks || 'Needs verification'} style={{ marginLeft: 6 }}>⚠️ verify</span> : null}
+                    </td>
+                    <td>{r.dod_year || '—'}</td>
+                    <td><span className="pill">{r.status}</span></td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button className="btn btn-accent btn-sm" onClick={() => openEdit(r)} style={{ marginRight: 6 }}>Edit</button>
+                      <button className="btn btn-red btn-sm" onClick={() => setDeleting(r)}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="pagination">
+            <span>Page {page} of {totalPages} · {rows.length} record{rows.length === 1 ? '' : 's'}</span>
+            <button className="btn btn-light btn-sm" disabled={page <= 1} onClick={() => setPage((v) => v - 1)}>← Prev</button>
+            <button className="btn btn-light btn-sm" disabled={page >= totalPages} onClick={() => setPage((v) => v + 1)}>Next →</button>
+          </div>
+        </>
+      )}
+
+      {showAdd && (
+        <Modal title="Add record" onClose={() => setShowAdd(false)}>
+          <RecordEditor form={form} setForm={setForm} onSubmit={submitAdd} busy={busy} submitLabel="Add Record" onCancel={() => setShowAdd(false)} />
+        </Modal>
+      )}
+      {editing && (
+        <Modal title={`Edit — ${editing.name}`} onClose={() => setEditing(null)}>
+          <RecordEditor form={form} setForm={setForm} onSubmit={submitEdit} busy={busy} submitLabel="Save Changes" onCancel={() => setEditing(null)} />
+        </Modal>
+      )}
+      {deleting && (
+        <Modal title="Remove this record?" onClose={() => setDeleting(null)}>
+          <p>Permanently remove <b>{deleting.name}</b> from the registry? This cannot be undone.</p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+            <button className="btn btn-light" onClick={() => setDeleting(null)}>Cancel</button>
+            <button className="btn btn-red" disabled={busy} onClick={confirmDelete}>{busy ? 'Removing…' : 'Yes, Remove'}</button>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function RecordEditor({ form, setForm, onSubmit, busy, submitLabel, onCancel }) {
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  return (
+    <form onSubmit={onSubmit}>
+      <div className="form-grid">
+        <div>
+          <label className="field">Full name *</label>
+          <input className="input" value={form.name} onChange={set('name')} placeholder="SURNAME, FIRSTNAME" />
+        </div>
+        <div>
+          <label className="field">Date of death</label>
+          <input className="input" value={form.dod} onChange={set('dod')} placeholder="e.g. 3/8/2022 or DIED 2000" />
+        </div>
+        <div>
+          <label className="field">Status</label>
+          <select className="input" value={form.status} onChange={set('status')}>
+            <option value="deceased">Deceased</option>
+            <option value="reserved">Reserved</option>
+            <option value="unknown">Unknown</option>
+          </select>
+        </div>
+        <div>
+          <label className="field">Remarks</label>
+          <input className="input" value={form.remarks} onChange={set('remarks')} placeholder="Optional note" />
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+        <button type="button" className="btn btn-light" onClick={onCancel}>Cancel</button>
+        <button type="submit" className="btn btn-green" disabled={busy}>{busy ? 'Saving…' : submitLabel}</button>
+      </div>
+    </form>
+  );
+}
+
+// ---- Visitor survey results ------------------------------------------------
+function SurveyPanel() {
+  const { responses, loading, dbError, databaseConnected, refresh, removeResponse } = useSurvey();
+  const toast = useToast();
+  const [deleting, setDeleting] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const stats = useMemo(
+    () =>
+      SURVEY_QUESTIONS.map((text, i) => ({
+        no: i + 1,
+        text,
+        ...computeWeightedMean(responses, i + 1),
+      })),
+    [responses]
+  );
+
+  const answeredStats = stats.filter((s) => s.n > 0);
+  const overallMean = answeredStats.length
+    ? answeredStats.reduce((sum, s) => sum + s.mean, 0) / answeredStats.length
+    : 0;
+  const best = answeredStats.length
+    ? answeredStats.reduce((a, b) => (b.mean > a.mean ? b : a))
+    : null;
+
+  const respondentMean = (r) => {
+    const vals = SURVEY_QUESTIONS.map((_, i) => Number(r.answers?.[i + 1])).filter(Boolean);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  };
+
+  const confirmDelete = async () => {
+    setBusy(true);
+    const res = await removeResponse(deleting.id);
+    setBusy(false);
+    if (!res.ok) { toast.error('Database error: ' + res.error); return; }
+    toast.success(`Response from ${deleting.name} removed.`);
+    setDeleting(null);
+  };
+
+  const downloadFile = (filename, content, type = 'text/csv;charset=utf-8') => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+  const exportCsv = () => {
+    const header = ['Name', 'Email', 'Consent', 'Submitted', ...SURVEY_QUESTIONS.map((_, i) => `Q${i + 1}`), 'Average'];
+    const lines = responses.map((r) =>
+      [
+        csvEscape(r.name),
+        csvEscape(r.email),
+        csvEscape(r.consent),
+        csvEscape(new Date(r.created_at).toLocaleString()),
+        ...SURVEY_QUESTIONS.map((_, i) => csvEscape(r.answers?.[i + 1] ?? '')),
+        csvEscape(respondentMean(r).toFixed(2)),
+      ].join(',')
+    );
+    downloadFile(`survey-responses-${new Date().toISOString().slice(0, 10)}.csv`, [header.join(','), ...lines].join('\n'));
+    toast.success(`${responses.length} response${responses.length === 1 ? '' : 's'} exported.`);
+  };
+
+  const printReport = () => {
+    const w = window.open('', '_blank');
+    if (!w) { toast.error('Popup blocked — allow popups to print.'); return; }
+    w.document.write(`<!doctype html><html><head><title>Survey Results Report</title>
+      <style>body{font-family:Georgia,serif;padding:32px;color:#222}h1{margin-bottom:4px}table{border-collapse:collapse;width:100%;margin-top:14px}th,td{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:13px}th{background:#0f2a20;color:#fff}</style></head><body>
+      <h1>Agnipa Memorial Park — Visitor Survey Results</h1>
+      <p>Generated ${new Date().toLocaleString()} · Total responses: <b>${responses.length}</b> · Overall weighted mean: <b>${overallMean ? overallMean.toFixed(2) : '—'}</b></p>
+      <p>Formula: x̄ = Σ(f·w) ⁄ N (w: Strongly Agree = 5 … Strongly Disagree = 1)</p>
+      <table><thead><tr><th>#</th><th>Statement</th><th>N</th><th>Σ(f·w)</th><th>x̄</th><th>Interpretation</th></tr></thead><tbody>
+      ${stats.map((s) => `<tr><td>${s.no}</td><td>${s.text}</td><td>${s.n}</td><td>${s.sumFw}</td><td>${s.n ? s.mean.toFixed(2) : '—'}</td><td>${s.interpretation.label}</td></tr>`).join('')}
+      </tbody></table>
+      <script>window.print();</script></body></html>`);
+    w.document.close();
+  };
+
+  return (
+    <>
+      <div className="grid grid-4" style={{ marginBottom: 22 }}>
+        <div className="card"><div className="kicker">Responses</div><div className="serif" style={{ fontSize: 36 }}>{responses.length}</div></div>
+        <div className="card"><div className="kicker">Overall weighted mean</div><div className="serif" style={{ fontSize: 36 }}>{overallMean ? overallMean.toFixed(2) : '—'}</div></div>
+        <div className="card">
+          <div className="kicker">Highest-rated item</div>
+          <div style={{ fontWeight: 700 }}>{best ? `Q${best.no} · ${best.mean.toFixed(2)}` : '—'}</div>
+          <div style={{ color: 'var(--muted)', fontSize: 13 }}>{best ? best.interpretation.label : ''}</div>
+        </div>
+        <div className="card">
+          <div className="kicker">Source</div>
+          <div className="serif" style={{ fontSize: 22 }}><span className={`status-dot ${databaseConnected ? 'on' : 'off'}`} />{databaseConnected ? 'Live database' : 'Local browser'}</div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 22 }}>
+        <div className="kicker">Survey results</div>
+        <h3 className="serif" style={{ margin: '4px 0 8px' }}>Weighted mean per question</h3>
+        <p style={{ color: 'var(--muted)', fontSize: 14, margin: '0 0 8px' }}>
+          <span className={`status-dot ${databaseConnected ? 'on' : 'off'}`} />
+          {databaseConnected
+            ? `Live responses from public.survey_responses · ${responses.length} total.`
+            : 'Offline mode — responses saved in this browser. Run supabase-survey.sql to collect them in the database.'}
+        </p>
+        <p className="wmean-formula">
+          Formula: x̄ = Σ(f·w) ⁄ N — f = frequency of each option, w = its weight (Strongly Agree = 5, Agree = 4, Moderately Agree = 3, Disagree = 2, Strongly Disagree = 1), N = total responses.
+        </p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+          <button className="btn btn-green btn-sm" onClick={exportCsv}>⬇ Export CSV (responses)</button>
+          <button className="btn btn-accent btn-sm" onClick={printReport}>🖨 Print report</button>
+          <button className="btn btn-light btn-sm" onClick={refresh}>↻ Refresh</button>
+        </div>
+      </div>
+
+      {dbError && <p className="error-text">Database: {dbError}</p>}
+      {loading ? (
+        <div className="skeleton" style={{ height: 320 }} />
+      ) : responses.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="📊" title="No survey responses yet" hint="Responses will appear here once visitors complete the survey." />
+        </div>
+      ) : (
+        <>
+          {stats.map((s) => (
+            <div className="card" key={s.no} style={{ marginBottom: 16 }}>
+              <div className="kicker">Question {s.no} of {SURVEY_QUESTIONS.length}</div>
+              <h3 className="serif" style={{ margin: '4px 0 14px', fontSize: 19 }}>{s.text}</h3>
+
+              <div style={{ display: 'flex', gap: 26, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+                <div style={{ minWidth: 160 }}>
+                  <div className="wmean-badge">{s.mean ? s.mean.toFixed(2) : '—'} <small>/ 5.00</small></div>
+                  <div className="wmean-formula">{s.interpretation.label} · N = {s.n}</div>
+                </div>
+                <div style={{ flex: '1 1 240px' }}>
+                  <div className="dist-bar">
+                    {LIKERT_OPTIONS.map((o) => (
+                      <span
+                        key={o.value}
+                        style={{ width: `${s.n ? (s.counts[o.value] / s.n) * 100 : 0}%`, background: o.color }}
+                        title={`${o.label}: ${s.counts[o.value]}`}
+                      />
+                    ))}
+                  </div>
+                  <div className="dist-legend">
+                    {LIKERT_OPTIONS.map((o) => (
+                      <span key={o.value}><i style={{ background: o.color }} />{o.label} · {s.counts[o.value]}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="table-wrap">
+                <table className="records" style={{ minWidth: 0 }}>
+                  <thead>
+                    <tr><th>Response option</th><th>Weight (w)</th><th>Frequency (f)</th><th>f · w</th></tr>
+                  </thead>
+                  <tbody>
+                    {LIKERT_OPTIONS.map((o) => (
+                      <tr key={o.value}>
+                        <td>{o.label}</td>
+                        <td>{o.value}</td>
+                        <td>{s.counts[o.value]}</td>
+                        <td>{s.counts[o.value] * o.value}</td>
+                      </tr>
+                    ))}
+                    <tr style={{ fontWeight: 700, background: '#faf7ef' }}>
+                      <td>Total</td>
+                      <td>—</td>
+                      <td>N = {s.n}</td>
+                      <td>Σ(f·w) = {s.sumFw}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <p className="wmean-formula" style={{ marginTop: 10 }}>
+                x̄ = Σ(f·w) ⁄ N = {s.sumFw} ⁄ {s.n} = <b>{s.n ? s.mean.toFixed(2) : '—'}</b>
+              </p>
+            </div>
+          ))}
+
+          <div className="card" style={{ marginTop: 22 }}>
+            <div className="kicker">Individual responses</div>
+            <h3 className="serif" style={{ margin: '4px 0 12px' }}>Respondent list</h3>
+            <div className="table-wrap">
+              <table className="records" style={{ minWidth: 720 }}>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Submitted</th>
+                    {SURVEY_QUESTIONS.map((_, i) => <th key={i}>Q{i + 1}</th>)}
+                    <th>x̄</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {responses.map((r) => (
+                    <tr key={r.id}>
+                      <td><b>{r.name}</b></td>
+                      <td>{r.email}</td>
+                      <td>{new Date(r.created_at).toLocaleString()}</td>
+                      {SURVEY_QUESTIONS.map((_, i) => <td key={i}>{r.answers?.[i + 1] ?? '—'}</td>)}
+                      <td>{respondentMean(r).toFixed(2)}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button className="btn btn-red btn-sm" onClick={() => setDeleting(r)}>Remove</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {deleting && (
+        <Modal title="Remove this response?" onClose={() => setDeleting(null)}>
+          <p>Permanently remove the survey response from <b>{deleting.name}</b> ({deleting.email})? This cannot be undone.</p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+            <button className="btn btn-light" onClick={() => setDeleting(null)}>Cancel</button>
+            <button className="btn btn-red" disabled={busy} onClick={confirmDelete}>{busy ? 'Removing…' : 'Yes, Remove'}</button>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+// ---- Map graves & walking routes (public.graves) ---------------------------
+function GravesPanel({ email }) {
   const { places, loading, dbError, databaseConnected, refresh, addGrave, removeGrave, updateGrave } = useGraves();
   const toast = useToast();
 
@@ -110,7 +689,8 @@ function Dashboard({ email, onLogout }) {
     const grave = form.name.trim();
     const hasRoute = routePts.length >= 2;
     if (hasRoute) addCustomRoutes([{ grave, entrance: 'entranceMain', waypoints: routePts }]);
-    const res = await addGrave({ name: form.name.trim(), section: form.section.trim(), level: 1, birthdate: form.birthdate ? fromISODate(form.birthdate) : null, dod: form.dod ? fromISODate(form.dod) : null, x: form.x || '50%', y: form.y || '50%' });
+    const lastPtAdd = routePts.length > 0 ? routePts[routePts.length - 1] : null;
+    const res = await addGrave({ name: form.name.trim(), section: form.section.trim(), level: 1, birthdate: form.birthdate ? fromISODate(form.birthdate) : null, dod: form.dod ? fromISODate(form.dod) : null, x: lastPtAdd ? `${lastPtAdd.x}%` : form.x || '50%', y: lastPtAdd ? `${lastPtAdd.y}%` : form.y || '50%' });
     setBusy(false);
     if (!res.ok) { toast.error('Database error: ' + res.error); return; }
     // Persist any traced walking-route waypoints for the new grave.
@@ -132,7 +712,12 @@ function Dashboard({ email, onLogout }) {
       return;
     }
     setBusy(true);
-    const res = await updateGrave(editing.id, { name: form.name.trim(), section: form.section.trim(), birthdate: form.birthdate ? fromISODate(form.birthdate) : null, dod: form.dod ? fromISODate(form.dod) : null, x: form.x || '50%', y: form.y || '50%' });
+    // The pin locator sits at the last marked route point when a route was
+    // traced; otherwise keep the manually entered X/Y.
+    const lastPt = routePts.length > 0 ? routePts[routePts.length - 1] : null;
+    const pinX = lastPt ? `${lastPt.x}%` : form.x || '50%';
+    const pinY = lastPt ? `${lastPt.y}%` : form.y || '50%';
+    const res = await updateGrave(editing.id, { name: form.name.trim(), section: form.section.trim(), birthdate: form.birthdate ? fromISODate(form.birthdate) : null, dod: form.dod ? fromISODate(form.dod) : null, x: pinX, y: pinY });
     setBusy(false);
     if (!res.ok) { toast.error('Database error: ' + res.error); return; }
     // Persist any traced walking-route waypoints for this grave.
@@ -215,88 +800,80 @@ function Dashboard({ email, onLogout }) {
 
   return (
     <>
-      <PageHero
-        eyebrow={`Signed in as ${email}`}
-        title="Records Dashboard."
-        subtitle="Search, add, correct, and organize every grave in the park registry."
-      />
-      <section className="section" style={{ paddingTop: 36 }}>
-        <div className="container">
-          <div className="grid grid-4" style={{ marginBottom: 22 }}>
-            <div className="card"><div className="kicker">Total records</div><div className="serif" style={{ fontSize: 36 }}>{places.length}</div></div>
-            <div className="card"><div className="kicker">Sections</div><div className="serif" style={{ fontSize: 36 }}>{sections.length - 1}</div></div>
-            <div className="card"><div className="kicker">Database</div><div className="serif" style={{ fontSize: 24 }}><span className={`status-dot ${databaseConnected ? 'on' : 'off'}`} />{databaseConnected ? 'Connected' : 'Local mode'}</div></div>
-            <div className="card"><div className="kicker">Latest entry</div><div style={{ fontWeight: 700 }}>{newest ? newest.name : '—'}</div><div style={{ color: 'var(--muted)', fontSize: 13 }}>{newest ? `Section ${graveSection(newest)}` : ''}</div></div>
-          </div>
+      <div className="grid grid-4" style={{ marginBottom: 22 }}>
+        <div className="card"><div className="kicker">Mapped graves</div><div className="serif" style={{ fontSize: 36 }}>{places.length}</div></div>
+        <div className="card"><div className="kicker">Sections</div><div className="serif" style={{ fontSize: 36 }}>{sections.length - 1}</div></div>
+        <div className="card"><div className="kicker">Database</div><div className="serif" style={{ fontSize: 24 }}><span className={`status-dot ${databaseConnected ? 'on' : 'off'}`} />{databaseConnected ? 'Connected' : 'Local mode'}</div></div>
+        <div className="card"><div className="kicker">Latest entry</div><div style={{ fontWeight: 700 }}>{newest ? newest.name : '—'}</div><div style={{ color: 'var(--muted)', fontSize: 13 }}>{newest ? `Section ${graveSection(newest)}` : ''}</div></div>
+      </div>
 
-          <div className="card" style={{ marginBottom: 22 }}>
-            <div className="kicker">Reports</div>
-            <h3 className="serif" style={{ margin: '4px 0 12px' }}>Generate reports</h3>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="btn btn-green btn-sm" onClick={exportCsv}>⬇ Export CSV (current view)</button>
-              <button className="btn btn-light btn-sm" onClick={exportSectionSummary}>⬇ Section summary (CSV)</button>
-              <button className="btn btn-accent btn-sm" onClick={printReport}>🖨 Print report</button>
-            </div>
-            <p style={{ color: 'var(--muted)', fontSize: 13, margin: '10px 0 0' }}>
-              Exports use the current search/section filters.
-            </p>
-          </div>
-
-          <div className="toolbar-row">            <input className="input" style={{ maxWidth: 280 }} value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} placeholder="Search by name…" />            <select className="select" style={{ maxWidth: 180 }} value={section} onChange={(e) => { setSection(e.target.value); setPage(1); }}>
-              {sections.map((s) => <option key={s} value={s}>{s === 'All' ? 'All sections' : `Section ${s}`}</option>)}
-            </select>
-            <select className="select" style={{ maxWidth: 180 }} value={sort} onChange={(e) => setSort(e.target.value)}>
-              <option value="name-asc">Name A–Z</option>
-              <option value="name-desc">Name Z–A</option>
-              <option value="section">By section</option>
-              <option value="newest">Newest first</option>
-            </select>
-            <button className="btn btn-light btn-sm" onClick={resetFilters}>Reset</button>
-            <span style={{ flex: 1 }} />
-            <button className="btn btn-light btn-sm" onClick={refresh}>↻ Refresh</button>
-            <button className="btn btn-green btn-sm" onClick={openAdd}>+ Add Grave</button>
-            <button className="btn btn-light btn-sm" onClick={onLogout}>Logout</button>
-          </div>
-
-          {dbError && <p className="error-text">Database: {dbError}</p>}
-          {loading ? (
-            <div className="skeleton" style={{ height: 320 }} />
-          ) : rows.length === 0 ? (
-            <div className="card"><EmptyState title="No records match" hint="Adjust your search or add a new grave record." /></div>
-          ) : (
-            <>
-              <div className="table-wrap">
-                <table className="records">
-                  <thead>
-                    <tr><th></th><th>Name</th><th>Section</th><th>Born</th><th>Passed</th><th style={{ textAlign: 'right' }}>Actions</th></tr>
-                  </thead>
-                  <tbody>
-                    {pageRows.map((p) => (
-                      <tr key={p.id}>
-                        <td>{photoForName(p.name) ? <img className="row-thumb" src={photoForName(p.name)} alt="" /> : <span>✝</span>}</td>
-                        <td><b>{p.name}</b></td>
-                        <td><span className="pill">{graveSection(p)}</span></td>
-                        <td>{p.birthdate || '—'}</td>
-                        <td>{p.dod || '—'}</td>
-                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          <Link className="btn btn-light btn-sm" to={`/grave/${p.id}`} style={{ marginRight: 6 }}>View</Link>
-                          <button className="btn btn-accent btn-sm" onClick={() => openEdit(p)} style={{ marginRight: 6 }}>Edit</button>
-                          <button className="btn btn-red btn-sm" onClick={() => setDeleting(p)}>Delete</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="pagination">
-                <span>Page {page} of {totalPages} · {rows.length} record{rows.length === 1 ? '' : 's'}</span>
-                <button className="btn btn-light btn-sm" disabled={page <= 1} onClick={() => setPage((v) => v - 1)}>← Prev</button>
-                <button className="btn btn-light btn-sm" disabled={page >= totalPages} onClick={() => setPage((v) => v + 1)}>Next →</button>
-              </div>
-            </>
-          )}
+      <div className="card" style={{ marginBottom: 22 }}>
+        <div className="kicker">Reports</div>
+        <h3 className="serif" style={{ margin: '4px 0 12px' }}>Generate reports</h3>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-green btn-sm" onClick={exportCsv}>⬇ Export CSV (current view)</button>
+          <button className="btn btn-light btn-sm" onClick={exportSectionSummary}>⬇ Section summary (CSV)</button>
+          <button className="btn btn-accent btn-sm" onClick={printReport}>🖨 Print report</button>
         </div>
-      </section>
+        <p style={{ color: 'var(--muted)', fontSize: 13, margin: '10px 0 0' }}>
+          Exports use the current search/section filters.
+        </p>
+      </div>
+
+      <div className="toolbar-row">
+        <input className="input" style={{ maxWidth: 280 }} value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} placeholder="Search by name…" />
+        <select className="select" style={{ maxWidth: 180 }} value={section} onChange={(e) => { setSection(e.target.value); setPage(1); }}>
+          {sections.map((s) => <option key={s} value={s}>{s === 'All' ? 'All sections' : `Section ${s}`}</option>)}
+        </select>
+        <select className="select" style={{ maxWidth: 180 }} value={sort} onChange={(e) => setSort(e.target.value)}>
+          <option value="name-asc">Name A–Z</option>
+          <option value="name-desc">Name Z–A</option>
+          <option value="section">By section</option>
+          <option value="newest">Newest first</option>
+        </select>
+        <button className="btn btn-light btn-sm" onClick={resetFilters}>Reset</button>
+        <span style={{ flex: 1 }} />
+        <button className="btn btn-light btn-sm" onClick={refresh}>↻ Refresh</button>
+        <button className="btn btn-green btn-sm" onClick={openAdd}>+ Add Grave</button>
+      </div>
+
+      {dbError && <p className="error-text">Database: {dbError}</p>}
+      {loading ? (
+        <div className="skeleton" style={{ height: 320 }} />
+      ) : rows.length === 0 ? (
+        <div className="card"><EmptyState title="No records match" hint="Adjust your search or add a new grave record." /></div>
+      ) : (
+        <>
+          <div className="table-wrap">
+            <table className="records">
+              <thead>
+                <tr><th></th><th>Name</th><th>Section</th><th>Born</th><th>Passed</th><th style={{ textAlign: 'right' }}>Actions</th></tr>
+              </thead>
+              <tbody>
+                {pageRows.map((p) => (
+                  <tr key={p.id}>
+                    <td>{photoForName(p.name) ? <img className="row-thumb" src={photoForName(p.name)} alt="" /> : <span>✝</span>}</td>
+                    <td><b>{p.name}</b></td>
+                    <td><span className="pill">{graveSection(p)}</span></td>
+                    <td>{p.birthdate || '—'}</td>
+                    <td>{p.dod || '—'}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <Link className="btn btn-light btn-sm" to={`/grave/${p.id}`} style={{ marginRight: 6 }}>View</Link>
+                      <button className="btn btn-accent btn-sm" onClick={() => openEdit(p)} style={{ marginRight: 6 }}>Edit</button>
+                      <button className="btn btn-red btn-sm" onClick={() => setDeleting(p)}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="pagination">
+            <span>Page {page} of {totalPages} · {rows.length} record{rows.length === 1 ? '' : 's'}</span>
+            <button className="btn btn-light btn-sm" disabled={page <= 1} onClick={() => setPage((v) => v - 1)}>← Prev</button>
+            <button className="btn btn-light btn-sm" disabled={page >= totalPages} onClick={() => setPage((v) => v + 1)}>Next →</button>
+          </div>
+        </>
+      )}
 
       {showAdd && (
         <Modal title="Add grave record" onClose={() => { setShowAdd(false); setRoutePts([]); }}>

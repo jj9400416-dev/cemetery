@@ -17,6 +17,7 @@ export default function Footer() {
           <Link to="/find">Find a Grave</Link>
           <Link to="/about">About</Link>
           <Link to="/services">Services & Hours</Link>
+          <Link to="/survey">Visitor Survey</Link>
         </div>
         <div>
           <h4>Support</h4>

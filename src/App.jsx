@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { BrowserRouter, Link, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider } from './auth.jsx';
 import { GravesProvider } from './graves.jsx';
+import { RecordsProvider } from './records.jsx';
+import { SurveyProvider } from './survey.jsx';
 import { ToastProvider } from './ui.jsx';
 import Navbar from './components/Navbar.jsx';
 import Footer from './components/Footer.jsx';
@@ -13,6 +15,7 @@ import Services from './pages/Services.jsx';
 import Contact from './pages/Contact.jsx';
 import Admin from './pages/Admin.jsx';
 import AdminLogin from './pages/AdminLogin.jsx';
+import Survey from './pages/Survey.jsx';
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -37,6 +40,7 @@ function Layout() {
           <Route path="/about" element={<About />} />
           <Route path="/services" element={<Services />} />
           <Route path="/contact" element={<Contact />} />
+          <Route path="/survey" element={<Survey />} />
           <Route path="/admin-login" element={<AdminLogin />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="*" element={<NotFound />} />
@@ -63,10 +67,14 @@ export default function App() {
     <ToastProvider>
       <AuthProvider>
         <GravesProvider>
-          <BrowserRouter>
-            <ScrollToTop />
-            <Layout />
-          </BrowserRouter>
+          <RecordsProvider>
+            <SurveyProvider>
+              <BrowserRouter>
+                <ScrollToTop />
+                <Layout />
+              </BrowserRouter>
+            </SurveyProvider>
+          </RecordsProvider>
         </GravesProvider>
       </AuthProvider>
     </ToastProvider>

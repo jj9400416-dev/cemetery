@@ -19,14 +19,12 @@ create policy "Anyone can view custom routes"
   using (true);
 
 drop policy if exists "Signed-in users save routes" on public.custom_routes;
-create policy "Signed-in users save routes"
+create policy "Anyone can save routes"
   on public.custom_routes for insert
-  to authenticated
   with check (true);
 
 drop policy if exists "Signed-in users update routes" on public.custom_routes;
-create policy "Signed-in users update routes"
+create policy "Anyone can update routes"
   on public.custom_routes for update
-  to authenticated
   using (true)
   with check (true);

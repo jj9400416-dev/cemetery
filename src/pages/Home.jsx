@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useGraves } from '../graves.jsx';
+import { useRecords } from '../records.jsx';
 import { photoForName, INITIAL_MAP_SECTIONS, graveSection } from '../data.js';
 import { SectionHead } from '../ui.jsx';
 import agnipaPhoto from '../../assets/Agnipa.jpg';
 
 export default function Home() {
   const { places, databaseConnected } = useGraves();
+  const { records } = useRecords();
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
 
@@ -45,6 +47,7 @@ export default function Home() {
           <div className="hero-actions">
             <Link className="btn btn-ghost" to="/find">Open Cemetery Map</Link>
             <Link className="btn btn-ghost" to="/services">Hours & Services</Link>
+            <Link className="btn btn-ghost" to="/survey">Take our survey</Link>
           </div>
         </div>
       </section>
@@ -52,7 +55,7 @@ export default function Home() {
       <div className="stat-band">
         <div className="container stat-grid">
           <div className="stat">
-            <div className="num">{places.length}</div>
+            <div className="num">{records.length || places.length}</div>
             <div className="lbl">Grave Records</div>
           </div>
           <div className="stat">

@@ -300,9 +300,10 @@ export default function FindGrave() {
                     const ys = s.points.map((p) => p[1]);
                     const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
                     const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
-                    const isDimmed = shouldFocus && !focusSections.has(s.id);
+                    const isFocused = focusSections.has(s.id);
+                    const isDimmed = shouldFocus && !isFocused;
                     return (
-                      <div key={s.id} className={`section-label${isDimmed ? ' dimmed' : ''}`} style={{ left: `${cx}%`, top: `${cy}%` }}>
+                      <div key={s.id} className={`section-label${isDimmed ? ' dimmed' : ''}${isFocused && shouldFocus ? ' active' : ''}`} style={{ left: `${cx}%`, top: `${cy}%` }}>
                         {s.label}
                       </div>
                     );

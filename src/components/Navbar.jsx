@@ -7,6 +7,7 @@ const LINKS = [
   { to: '/find', label: 'Find a Grave' },
   { to: '/about', label: 'About' },
   { to: '/services', label: 'Services' },
+  { to: '/survey', label: 'Survey' },
   { to: '/contact', label: 'Contact' },
 ];
 

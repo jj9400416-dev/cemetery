@@ -8,7 +8,7 @@ const jonelCarpio = '/Jonel Carpio.png';
 import joseRizal from '../assets/Jose Rizal.png';
 import juanDelacruz from '../assets/Juan Delacruz.png';
 import luzMenduza from '../assets/Luz Menduza.png';
-import mariaClara from '../assets/Maria Clara.jpg';
+import mariaClara from '../assets/Maria Clara.png';
 // The result for Mario Kulob is the actual file served verbatim from public/.
 const marioKulob = '/Mario Kulob.png';
 import pedroPenduko from '../assets/Pedro Penduko.png';
