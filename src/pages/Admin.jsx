@@ -5,7 +5,7 @@ import { useGraves } from '../graves.jsx';
 import { useRecords } from '../records.jsx';
 import { useSurvey } from '../survey.jsx';
 import { supabase } from '../supabaseClient.js';
-import { photoForName, mapImage, graveSection } from '../data.js';
+import { photoForName, mapImage, graveSection, INITIAL_MAP_SECTIONS } from '../data.js';
 import { SURVEY_QUESTIONS, LIKERT_OPTIONS, computeWeightedMean } from '../surveyData.js';
 import { addCustomRoutes, ROUTES } from '../routing.js';
 import { PageHero, EmptyState, useToast } from '../ui.jsx';
@@ -40,6 +40,21 @@ const splitName = (name) => {
 const yearFromText = (text) => {
   const m = String(text || '').match(/(?:19|20)\d{2}/g);
   return m ? Number(m[m.length - 1]) : null;
+};
+
+// Compare names across the registry ("ABELLO, CONCEPCION") and map graves
+// ("Abello, Concepcion") by stripping case and punctuation.
+const normalizeName = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+
+// Registry death dates are free text ("2/5/2012", "DIED 2007"). Normalize the
+// parseable ones to "Month D, YYYY" for display; keep everything else verbatim.
+const formatDodText = (text) => {
+  const t = String(text || '').trim();
+  if (!t) return null;
+  if (/^\d{4}$/.test(t)) return t; // bare year — no month/day to invent
+  const d = new Date(t);
+  if (isNaN(d.getTime()) || d.getFullYear() < 1000 || d.getFullYear() > 2100) return t;
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 };
 
 export default function Admin() {
@@ -119,6 +134,8 @@ function Dashboard({ email }) {
 // ---- Deceased registry (public.deceased) -----------------------------------
 function RegistryPanel() {
   const { records, loading, dbError, databaseConnected, refresh, addRecord, updateRecord, removeRecord } = useRecords();
+  // Map-grave side of "Show on map": place/update the pin and walking route.
+  const { places, addGrave, updateGrave } = useGraves();
   const toast = useToast();
 
   const [query, setQuery] = useState('');
@@ -130,6 +147,11 @@ function RegistryPanel() {
   const [deleting, setDeleting] = useState(null);
   const [form, setForm] = useState(EMPTY_RECORD);
   const [busy, setBusy] = useState(false);
+  // Registry record currently being pushed to the map-graves list.
+  const [publishing, setPublishing] = useState(null);
+  const [publishForm, setPublishForm] = useState({ name: '', section: '', birthdate: '', dod: '', x: '50%', y: '50%' });
+  const [publishRoutePts, setPublishRoutePts] = useState([]);
+  const [publishBusy, setPublishBusy] = useState(false);
 
   const counts = useMemo(
     () => ({
@@ -213,6 +235,72 @@ function RegistryPanel() {
     if (!res.ok) { toast.error('Database error: ' + res.error); return; }
     toast.success(`${deleting.name} removed.`);
     setDeleting(null);
+  };
+
+  // Pre-fill the "Show on map" modal: reuse the existing pin/route when this
+  // person is already on the map, otherwise seed from the registry row.
+  const openPublish = (r) => {
+    const key = normalizeName(r.name);
+    const existing = places.find((p) => normalizeName(p.name) === key);
+    const existingRoute = ROUTES.find((rt) => normalizeName(rt.grave) === key);
+    setPublishing(r);
+    setPublishForm({
+      name: r.name || '',
+      section: existing && graveSection(existing) !== '—' ? graveSection(existing) : '',
+      birthdate: existing?.birthdate ? toISODate(existing.birthdate) : '',
+      dod: r.dod_raw || existing?.dod || (r.dod_date ? formatDodText(r.dod_date) : ''),
+      x: existing?.x || '50%',
+      y: existing?.y || '50%',
+    });
+    setPublishRoutePts(existingRoute?.waypoints ? existingRoute.waypoints.map((w) => ({ x: +w.x, y: +w.y })) : []);
+  };
+
+  const submitPublish = async (e) => {
+    e.preventDefault();
+    const name = publishForm.name.trim();
+    if (!name) { toast.error('Name is required.'); return; }
+    setPublishBusy(true);
+    // Register the traced route first so the pin can snap to its last point.
+    const hasRoute = publishRoutePts.length >= 2;
+    if (hasRoute) addCustomRoutes([{ grave: name, entrance: 'entranceMain', waypoints: publishRoutePts }]);
+    const lastPt = publishRoutePts.length > 0 ? publishRoutePts[publishRoutePts.length - 1] : null;
+    const x = lastPt ? `${lastPt.x}%` : publishForm.x || '50%';
+    const y = lastPt ? `${lastPt.y}%` : publishForm.y || '50%';
+    // Section can be typed, or derived from where the pin/route lands on the map.
+    let section = publishForm.section.trim();
+    if (!section) {
+      const derived = graveSection({ x, y });
+      if (derived && derived !== '—') section = derived;
+    }
+    if (!section) {
+      setPublishBusy(false);
+      toast.error('Section is required — type one (e.g. S1) or move the pin/route inside a section.');
+      return;
+    }
+    const payload = {
+      name,
+      section,
+      level: 1,
+      birthdate: publishForm.birthdate ? fromISODate(publishForm.birthdate) : null,
+      dod: formatDodText(publishForm.dod),
+      x,
+      y,
+    };
+    const key = normalizeName(name);
+    const existing = places.find((p) => normalizeName(p.name) === key);
+    const res = existing ? await updateGrave(existing.id, payload) : await addGrave(payload);
+    setPublishBusy(false);
+    if (!res.ok) { toast.error('Database error: ' + res.error); return; }
+    // Persist the walking-route waypoints for this grave.
+    if (hasRoute && supabase) {
+      const { error } = await supabase
+        .from('custom_routes')
+        .upsert({ grave: name, waypoints: publishRoutePts, entrance: 'entranceMain' }, { onConflict: 'grave' });
+      if (error) toast.error('Saved on the map, but route save failed: ' + error.message);
+    }
+    toast.success(existing ? `${name} updated on the map.` : `${name} added to the map (Section ${section}).`);
+    setPublishing(null);
+    setPublishRoutePts([]);
   };
 
   const downloadFile = (filename, content, type = 'text/csv;charset=utf-8') => {
@@ -322,6 +410,14 @@ function RegistryPanel() {
                     <td>{r.dod_year || '—'}</td>
                     <td><span className="pill">{r.status}</span></td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button
+                        className="btn btn-gold btn-sm"
+                        onClick={() => openPublish(r)}
+                        style={{ marginRight: 6 }}
+                        title="Update this record's info and route, then place it on the map graves"
+                      >
+                        Show on map
+                      </button>
                       <button className="btn btn-accent btn-sm" onClick={() => openEdit(r)} style={{ marginRight: 6 }}>Edit</button>
                       <button className="btn btn-red btn-sm" onClick={() => setDeleting(r)}>Delete</button>
                     </td>
@@ -346,6 +442,91 @@ function RegistryPanel() {
       {editing && (
         <Modal title={`Edit — ${editing.name}`} onClose={() => setEditing(null)}>
           <RecordEditor form={form} setForm={setForm} onSubmit={submitEdit} busy={busy} submitLabel="Save Changes" onCancel={() => setEditing(null)} />
+        </Modal>
+      )}
+      {publishing && (
+        <Modal
+          title={`Show on map — ${publishing.name}`}
+          onClose={() => { setPublishing(null); setPublishRoutePts([]); }}
+        >
+          <p style={{ color: 'var(--muted)', fontSize: 14, margin: '0 0 12px' }}>
+            {(() => {
+              const already = places.some((p) => normalizeName(p.name) === normalizeName(publishing.name));
+              return already
+                ? 'This person is already on the map — saving will update their info, pin, and route.'
+                : 'Copy this record to the map graves: check the details, trace the walking route, and it appears on Find a Grave.';
+            })()}
+          </p>
+          <form onSubmit={submitPublish}>
+            <div className="form-grid">
+              <div>
+                <label className="field">Full name *</label>
+                <input
+                  className="input"
+                  value={publishForm.name}
+                  onChange={(e) => setPublishForm((f) => ({ ...f, name: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="field">Section * (e.g. S1)</label>
+                <input
+                  className="input"
+                  list="publish-sections"
+                  value={publishForm.section}
+                  onChange={(e) => setPublishForm((f) => ({ ...f, section: e.target.value }))}
+                  placeholder="Leave blank to derive from the pin"
+                />
+                <datalist id="publish-sections">
+                  {INITIAL_MAP_SECTIONS.map((s) => <option key={s.id} value={s.id} />)}
+                </datalist>
+              </div>
+              <div>
+                <label className="field">Birthdate</label>
+                <input
+                  className="input"
+                  type="date"
+                  value={publishForm.birthdate}
+                  onChange={(e) => setPublishForm((f) => ({ ...f, birthdate: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="field">Date of death (from registry)</label>
+                <input
+                  className="input"
+                  value={publishForm.dod}
+                  onChange={(e) => setPublishForm((f) => ({ ...f, dod: e.target.value }))}
+                  placeholder="e.g. 2/5/2012 or DIED 2007"
+                />
+              </div>
+              <div>
+                <label className="field">Pin X (%)</label>
+                <input
+                  className="input"
+                  value={publishForm.x}
+                  onChange={(e) => setPublishForm((f) => ({ ...f, x: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="field">Pin Y (%)</label>
+                <input
+                  className="input"
+                  value={publishForm.y}
+                  onChange={(e) => setPublishForm((f) => ({ ...f, y: e.target.value }))}
+                />
+              </div>
+            </div>
+            <RouteTracer
+              points={publishRoutePts}
+              onChange={setPublishRoutePts}
+              label="Walking route (optional — the last point becomes the pin)"
+            />
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+              <button type="button" className="btn btn-light" onClick={() => { setPublishing(null); setPublishRoutePts([]); }}>Cancel</button>
+              <button type="submit" className="btn btn-green" disabled={publishBusy}>
+                {publishBusy ? 'Saving…' : 'Save to map'}
+              </button>
+            </div>
+          </form>
         </Modal>
       )}
       {deleting && (
