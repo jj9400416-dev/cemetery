@@ -64,7 +64,7 @@ export default function Navbar() {
             <NavLink
               to="/admin-login"
               onClick={() => setOpen(false)}
-              className={({ isActive }) => (isActive ? 'active admin-login-burger' : 'admin-login-burger')}
+              className={({ isActive }) => (isActive ? 'active' : '')}
             >
               Log in as Admin
             </NavLink>

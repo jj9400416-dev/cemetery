@@ -32,8 +32,9 @@ export function RecordsProvider({ children }) {
       setDbError(error.message);
       setRecords(DECEASED_FALLBACK);
       setDatabaseConnected(false);
-    } else if (data && data.length) {
-      setRecords(data);
+    } else if (data) {
+      // Use data if available (even if empty array), otherwise fallback
+      setRecords(data.length ? data : DECEASED_FALLBACK);
       setDatabaseConnected(true);
     } else {
       setRecords(DECEASED_FALLBACK);

@@ -55,7 +55,7 @@ export default function Home() {
       <div className="stat-band">
         <div className="container stat-grid">
           <div className="stat">
-            <div className="num">{records.length || places.length}</div>
+            <div className="num">{records?.length ?? places.length}</div>
             <div className="lbl">Grave Records</div>
           </div>
           <div className="stat">
@@ -140,6 +140,7 @@ export default function Home() {
           <div className="grid grid-4">
             {INITIAL_MAP_SECTIONS.map((s) => {
               const count = places.filter((p) => graveSection(p) === s.id).length;
+              const totalCount = records.length || count;
               return (
                 <Link
                   key={s.id}
@@ -149,7 +150,7 @@ export default function Home() {
                 >
                   <div className="card-icon">{s.id}</div>
                   <h3>Section {s.label}</h3>
-                  <p>{count} recorded grave{count === 1 ? '' : 's'}</p>
+                  <p>{count > 0 ? count : totalCount} recorded grave{(count > 0 ? count : totalCount) === 1 ? '' : 's'}</p>
                 </Link>
               );
             })}

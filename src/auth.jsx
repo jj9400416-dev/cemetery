@@ -4,9 +4,27 @@ import { supabase } from './supabaseClient.js';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isSignedIn, setIsSignedIn] = useState(false);
-  const [adminEmail, setAdminEmail] = useState('');
+  const [isAdmin, setIsAdmin] = useState(() => {
+    try {
+      return localStorage.getItem('isAdmin') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [isSignedIn, setIsSignedIn] = useState(() => {
+    try {
+      return localStorage.getItem('isSignedIn') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [adminEmail, setAdminEmail] = useState(() => {
+    try {
+      return localStorage.getItem('adminEmail') || '';
+    } catch {
+      return '';
+    }
+  });
   const [authError, setAuthError] = useState('');
 
   const loginAdmin = async (email, password) => {
@@ -16,10 +34,15 @@ export function AuthProvider({ children }) {
     // Local master admin — checked first so it works with or without Supabase.
     // NOTE: hardcoded credential, visible in the client bundle. Replace with a
     // proper Supabase Auth user for production.
-    if (trimmedEmail.toLowerCase() === 'admin' && trimmedPassword === 'ADMIN123') {
+    if (trimmedEmail.toLowerCase() === 'admin' && (trimmedPassword === 'ADMIN123' || trimmedPassword === 'LGUADMIN')) {
       setIsSignedIn(true);
       setIsAdmin(true);
       setAdminEmail(trimmedEmail);
+      try {
+        localStorage.setItem('isSignedIn', 'true');
+        localStorage.setItem('isAdmin', 'true');
+        localStorage.setItem('adminEmail', trimmedEmail);
+      } catch {}
       return { ok: true, admin: true };
     }
     if (supabase) {
@@ -41,13 +64,11 @@ export function AuthProvider({ children }) {
       setIsSignedIn(true);
       setIsAdmin(true);
       setAdminEmail(trimmedEmail);
-      return { ok: true, admin: true };
-    }
-    // Local fallback when Supabase is not configured
-    if (trimmedEmail.toLowerCase() === 'admin' && trimmedPassword === 'LGUADMIN') {
-      setIsSignedIn(true);
-      setIsAdmin(true);
-      setAdminEmail(trimmedEmail);
+      try {
+        localStorage.setItem('isSignedIn', 'true');
+        localStorage.setItem('isAdmin', 'true');
+        localStorage.setItem('adminEmail', trimmedEmail);
+      } catch {}
       return { ok: true, admin: true };
     }
     const msg = 'Invalid username or password.';
@@ -60,6 +81,11 @@ export function AuthProvider({ children }) {
     setIsSignedIn(false);
     setIsAdmin(false);
     setAdminEmail('');
+    try {
+      localStorage.removeItem('isSignedIn');
+      localStorage.removeItem('isAdmin');
+      localStorage.removeItem('adminEmail');
+    } catch {}
   };
 
   return (
