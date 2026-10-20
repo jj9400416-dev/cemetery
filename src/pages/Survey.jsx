@@ -28,7 +28,7 @@ export default function Survey() {
     if (!EMAIL_RE.test(form.email.trim())) errs.email = 'Please enter a valid email address.';
     const unanswered = SURVEY_QUESTIONS.map((_, i) => i + 1).filter((n) => !answers[n]);
     if (unanswered.length) {
-      errs.answers = `Please answer all 7 questions. Still missing: ${unanswered.join(', ')}.`;
+      errs.answers = `Please answer all ${SURVEY_QUESTIONS.length} questions. Still missing: ${unanswered.join(', ')}.`;
     }
     setErrors(errs);
     if (Object.keys(errs).length) {

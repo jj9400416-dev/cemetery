@@ -2,13 +2,21 @@
 // Shared by the public survey page and the admin results panel.
 
 export const SURVEY_QUESTIONS = [
-  'The cemetery grounds and graves are clean and well-maintained.',
-  'It is easy to locate a grave using the cemetery map.',
-  'The memorial records (names and dates) are accurate and complete.',
-  'The walking route from the main entrance to the grave is clear and helpful.',
-  'The park staff are respectful, accommodating, and responsive.',
-  'The website is easy to use and understand.',
-  'I would recommend Agnipa Memorial Park to family and friends.',
+  'The survey responds quickly.',
+  'The system runs efficiently.',
+  'The system shows deceased information quickly.',
+  'The system performs its intended task.',
+  'The system produces expected results.',
+  'The system provides a clear map and route guide.',
+  'The system locates graves accurately.',
+  'The system shows accurate deceased information.',
+  'The system runs without error.',
+  'The system is easy to use and understand.',
+  'The system provides accurate content.',
+  'The system has a simple, easy-to-follow user interface.',
+  'The system works properly with commonly used web browsers.',
+  'The system works properly across different devices.',
+  'The system works without error across different devices and web browsers.',
 ];
 
 // Five-point Likert scale. `value` doubles as the weight (w) used in the
