@@ -9,6 +9,21 @@ import { getRoute } from '../routing.js';
 const parsePercent = (v) => parseFloat(String(v).replace('%', '')) || 0;
 const toPt = (p) => (p?.x == null || p?.y == null ? null : { x: parsePercent(p.x), y: parsePercent(p.y) });
 
+const nameWords = (name) =>
+  String(name || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+// Whole-word search: "juan" matches "Juan Dela Cruz" but not "Juanita ...".
+// Partial substring matching is kept as a fallback so typing a few letters
+// ("juanit", "del") still narrows the list.
+const matchesWholeWords = (name, query) => {
+  const words = nameWords(name);
+  const tokens = nameWords(query);
+  return tokens.length > 0 && tokens.every((t) => words.includes(t));
+};
+
 // The map displays `assets/agnipa map.jpg` as the base image. Section highlights,
 // grave pins, entrances and routes are drawn as overlays on top.
 // Stored coordinates are percent of the canonical base frame (agnipa map.jpg),
@@ -61,11 +76,15 @@ export default function FindGrave() {
 
   const filteredPlaces = useMemo(() => {
     const q = searchText.trim().toLowerCase();
-    return places.filter((p) => {
-      const matchName = !q || p.name.toLowerCase().includes(q);
-      const matchSection = sectionFilter === 'All' || graveSection(p) === sectionFilter;
-      return matchName && matchSection;
-    });
+    const inSection = places.filter(
+      (p) => sectionFilter === 'All' || graveSection(p) === sectionFilter
+    );
+    if (!q) return inSection;
+    // Only pins/records whose name contains the query as a whole word appear
+    // when there is such a match; "juan" therefore hides "juanita".
+    const exact = inSection.filter((p) => matchesWholeWords(p.name, q));
+    if (exact.length > 0) return exact;
+    return inSection.filter((p) => p.name.toLowerCase().includes(q));
   }, [searchText, places, sectionFilter]);
 
   // Typing a new name clears any previously selected grave so the search
