@@ -661,15 +661,10 @@ function SurveyPanel() {
 
   const exportCsv = () => {
     const itemMeans = answeredStats.map((s) => s.mean);
-    const totalFw = stats.reduce((sum, s) => sum + s.sumFw, 0);
-    const totalN = stats.reduce((sum, s) => sum + s.n, 0);
-    const pooledMean = totalN ? totalFw / totalN : 0;
-
-    // Every cell is quoted so commas in statements and formulas stay intact.
     const row = (...cells) => cells.map(csvEscape).join(',');
     const lines = [];
 
-    lines.push(row('Agnipa Memorial Park - Visitor Survey Results'));
+    lines.push(row('WEIGHTED MEAN SUMMARY AND FULL COMPUTATION'));
     lines.push(row('Generated', new Date().toLocaleString()));
     lines.push(row('Total responses', responses.length));
     lines.push(row('N (answered)', answered));
@@ -677,122 +672,78 @@ function SurveyPanel() {
     lines.push(row('f', 'Frequency (number of respondents who chose an option)'));
     lines.push(row('w', 'Weight (Strongly Agree = 5, Agree = 4, Moderately Agree = 3, Disagree = 2, Strongly Disagree = 1)'));
     lines.push(row('N', 'Total responses to the statement (N = Σf)'));
-    lines.push(row('Interpretation bands', '4.21-5.00 Strongly Agree; 3.41-4.20 Agree; 2.61-3.40 Moderately Agree; 1.81-2.60 Disagree; 1.00-1.80 Strongly Disagree'));
+    lines.push(row('Rating scale', '5 = Strongly Agree; 4 = Agree; 3 = Moderately Agree; 2 = Disagree; 1 = Strongly Disagree'));
     lines.push('');
 
-    lines.push(row('SUMMARY OF WEIGHTED MEANS'));
-    lines.push(row('Section', 'Question #', 'Statement', 'N', 'Σ(f·w)', 'x̄', 'Interpretation'));
-    for (const section of SURVEY_SECTIONS) {
-      for (const no of section.questionNos) {
-        const s = stats.find((x) => x.no === no);
-        if (!s) continue;
-        lines.push(row(
-          section.title,
-          s.no,
-          s.text,
-          s.n,
-          s.sumFw,
-          s.n ? s.mean.toFixed(2) : '',
-          s.n ? s.interpretation.label : 'No responses'
-        ));
-      }
+    lines.push(row('WEIGHTED MEAN SUMMARY'));
+    lines.push(row('Criteria', '5', '4', '3', '2', '1', 'Total Responses', 'Weighted Mean', 'Interpretation'));
+    for (const s of stats) {
+      lines.push(row(
+        s.text,
+        s.counts[5],
+        s.counts[4],
+        s.counts[3],
+        s.counts[2],
+        s.counts[1],
+        s.n,
+        s.n ? s.mean.toFixed(2) : '',
+        s.n ? s.interpretation.label : 'No responses'
+      ));
     }
     lines.push('');
 
-    lines.push(row('COMPUTATION PER STATEMENT'));
+    lines.push(row('DETAILED COMPUTATION'));
     lines.push(row(
-      'Section',
-      'Question #',
-      'Statement',
-      'Response option',
-      'Weight (w)',
-      'Frequency (f)',
-      'f · w',
-      'N',
-      'Σ(f·w)',
-      'x̄',
-      'Interpretation',
-      'Computation'
+      'Criteria',
+      '5 x frequency',
+      '4 x frequency',
+      '3 x frequency',
+      '2 x frequency',
+      '1 x frequency',
+      'Weighted Total',
+      'Calculation / Mean'
     ));
-    for (const section of SURVEY_SECTIONS) {
-      for (const no of section.questionNos) {
-        const s = stats.find((x) => x.no === no);
-        if (!s) continue;
-        for (const o of LIKERT_OPTIONS) {
-          lines.push(row(
-            section.title,
-            s.no,
-            s.text,
-            o.label,
-            o.value,
-            s.counts[o.value],
-            s.counts[o.value] * o.value
-          ));
-        }
-        lines.push(row(
-          section.title,
-          s.no,
-          s.text,
-          'Total',
-          '',
-          `N = ${s.n}`,
-          `Σ(f·w) = ${s.sumFw}`,
-          s.n,
-          s.sumFw,
-          s.n ? s.mean.toFixed(2) : '',
-          s.n ? s.interpretation.label : 'No responses',
-          s.n ? `x̄ = Σ(f·w) / N = ${s.sumFw} / ${s.n} = ${s.mean.toFixed(2)}` : 'No responses'
-        ));
-      }
+    for (const s of stats) {
+      lines.push(row(
+        s.text,
+        s.counts[5] * 5,
+        s.counts[4] * 4,
+        s.counts[3] * 3,
+        s.counts[2] * 2,
+        s.counts[1] * 1,
+        s.sumFw,
+        s.n ? `${s.sumFw} / ${s.n} = ${s.mean.toFixed(2)}` : 'No responses'
+      ));
     }
     lines.push('');
 
-    lines.push(row('OVERALL RESULT'));
-    lines.push(row('Metric', 'Value', 'Computation'));
+    lines.push(row('WRITTEN COMPUTATION'));
+    lines.push(row('Criteria', 'Computation'));
+    for (const s of stats) {
+      lines.push(row(
+        s.text,
+        s.n
+          ? `(${s.counts[5]} x 5) + (${s.counts[4]} x 4) + (${s.counts[3]} x 3) + (${s.counts[2]} x 2) + (${s.counts[1]} x 1) = ${s.sumFw}; ${s.sumFw} / ${s.n} = ${s.mean.toFixed(2)}`
+          : 'No responses'
+      ));
+    }
+    lines.push('');
+
+    lines.push(row('OVERALL WEIGHTED MEAN'));
     lines.push(row(
-      'Overall weighted mean (mean of item means)',
+      'Overall Weighted Mean',
       overallMean ? overallMean.toFixed(2) : '',
       itemMeans.length
         ? `(${itemMeans.map((m) => m.toFixed(2)).join(' + ')}) / ${itemMeans.length} = ${overallMean.toFixed(2)}`
         : 'No responses'
     ));
-    lines.push(row(
-      'Pooled weighted mean (all answers)',
-      totalN ? pooledMean.toFixed(2) : '',
-      totalN
-        ? `Σ(all f·w) / ΣN = ${totalFw} / ${totalN} = ${pooledMean.toFixed(2)}`
-        : 'No responses'
-    ));
-    lines.push('');
-
-    lines.push(row('INDIVIDUAL RESPONSES'));
-    lines.push(row(
-      'Name',
-      'Email',
-      'Consent',
-      'Submitted',
-      ...RESPONDENT_PROFILE_COLUMNS.map((c) => c.label),
-      ...SURVEY_QUESTIONS.map((_, i) => `Q${i + 1}`),
-      'Average'
-    ));
-    for (const r of responses) {
-      lines.push(row(
-        r.name,
-        r.email,
-        r.consent,
-        new Date(r.created_at).toLocaleString(),
-        ...RESPONDENT_PROFILE_COLUMNS.map((c) => r.profile?.[c.key] ?? ''),
-        ...SURVEY_QUESTIONS.map((_, i) => r.answers?.[i + 1] ?? ''),
-        respondentMean(r).toFixed(2)
-      ));
-    }
 
     downloadFile(
       `survey-results-${new Date().toISOString().slice(0, 10)}.csv`,
       // BOM keeps x̄, Σ, and the en dashes readable when opened in Excel.
       `\uFEFF${lines.join('\n')}`
     );
-    toast.success('Survey results and weighted-mean computation exported.');
+    toast.success('Weighted-mean summary and computation exported.');
   };
 
   const printReport = () => {
@@ -974,7 +925,7 @@ function SurveyPanel() {
         })()}
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-          <button className="btn btn-green btn-sm" onClick={exportCsv}>⬇ Export CSV (results + computation)</button>
+          <button className="btn btn-green btn-sm" onClick={exportCsv}>⬇ Export CSV (weighted mean)</button>
           <button className="btn btn-accent btn-sm" onClick={printReport}>🖨 Print report</button>
           <button className="btn btn-light btn-sm" onClick={refresh}>↻ Refresh</button>
         </div>
