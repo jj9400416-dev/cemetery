@@ -660,28 +660,139 @@ function SurveyPanel() {
   const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
   const exportCsv = () => {
-    const header = [
+    const itemMeans = answeredStats.map((s) => s.mean);
+    const totalFw = stats.reduce((sum, s) => sum + s.sumFw, 0);
+    const totalN = stats.reduce((sum, s) => sum + s.n, 0);
+    const pooledMean = totalN ? totalFw / totalN : 0;
+
+    // Every cell is quoted so commas in statements and formulas stay intact.
+    const row = (...cells) => cells.map(csvEscape).join(',');
+    const lines = [];
+
+    lines.push(row('Agnipa Memorial Park - Visitor Survey Results'));
+    lines.push(row('Generated', new Date().toLocaleString()));
+    lines.push(row('Total responses', responses.length));
+    lines.push(row('N (answered)', answered));
+    lines.push(row('Formula', 'x̄ = Σ(f·w) / N'));
+    lines.push(row('f', 'Frequency (number of respondents who chose an option)'));
+    lines.push(row('w', 'Weight (Strongly Agree = 5, Agree = 4, Moderately Agree = 3, Disagree = 2, Strongly Disagree = 1)'));
+    lines.push(row('N', 'Total responses to the statement (N = Σf)'));
+    lines.push(row('Interpretation bands', '4.21-5.00 Strongly Agree; 3.41-4.20 Agree; 2.61-3.40 Moderately Agree; 1.81-2.60 Disagree; 1.00-1.80 Strongly Disagree'));
+    lines.push('');
+
+    lines.push(row('SUMMARY OF WEIGHTED MEANS'));
+    lines.push(row('Section', 'Question #', 'Statement', 'N', 'Σ(f·w)', 'x̄', 'Interpretation'));
+    for (const section of SURVEY_SECTIONS) {
+      for (const no of section.questionNos) {
+        const s = stats.find((x) => x.no === no);
+        if (!s) continue;
+        lines.push(row(
+          section.title,
+          s.no,
+          s.text,
+          s.n,
+          s.sumFw,
+          s.n ? s.mean.toFixed(2) : '',
+          s.n ? s.interpretation.label : 'No responses'
+        ));
+      }
+    }
+    lines.push('');
+
+    lines.push(row('COMPUTATION PER STATEMENT'));
+    lines.push(row(
+      'Section',
+      'Question #',
+      'Statement',
+      'Response option',
+      'Weight (w)',
+      'Frequency (f)',
+      'f · w',
+      'N',
+      'Σ(f·w)',
+      'x̄',
+      'Interpretation',
+      'Computation'
+    ));
+    for (const section of SURVEY_SECTIONS) {
+      for (const no of section.questionNos) {
+        const s = stats.find((x) => x.no === no);
+        if (!s) continue;
+        for (const o of LIKERT_OPTIONS) {
+          lines.push(row(
+            section.title,
+            s.no,
+            s.text,
+            o.label,
+            o.value,
+            s.counts[o.value],
+            s.counts[o.value] * o.value
+          ));
+        }
+        lines.push(row(
+          section.title,
+          s.no,
+          s.text,
+          'Total',
+          '',
+          `N = ${s.n}`,
+          `Σ(f·w) = ${s.sumFw}`,
+          s.n,
+          s.sumFw,
+          s.n ? s.mean.toFixed(2) : '',
+          s.n ? s.interpretation.label : 'No responses',
+          s.n ? `x̄ = Σ(f·w) / N = ${s.sumFw} / ${s.n} = ${s.mean.toFixed(2)}` : 'No responses'
+        ));
+      }
+    }
+    lines.push('');
+
+    lines.push(row('OVERALL RESULT'));
+    lines.push(row('Metric', 'Value', 'Computation'));
+    lines.push(row(
+      'Overall weighted mean (mean of item means)',
+      overallMean ? overallMean.toFixed(2) : '',
+      itemMeans.length
+        ? `(${itemMeans.map((m) => m.toFixed(2)).join(' + ')}) / ${itemMeans.length} = ${overallMean.toFixed(2)}`
+        : 'No responses'
+    ));
+    lines.push(row(
+      'Pooled weighted mean (all answers)',
+      totalN ? pooledMean.toFixed(2) : '',
+      totalN
+        ? `Σ(all f·w) / ΣN = ${totalFw} / ${totalN} = ${pooledMean.toFixed(2)}`
+        : 'No responses'
+    ));
+    lines.push('');
+
+    lines.push(row('INDIVIDUAL RESPONSES'));
+    lines.push(row(
       'Name',
       'Email',
       'Consent',
       'Submitted',
       ...RESPONDENT_PROFILE_COLUMNS.map((c) => c.label),
       ...SURVEY_QUESTIONS.map((_, i) => `Q${i + 1}`),
-      'Average',
-    ];
-    const lines = responses.map((r) =>
-      [
-        csvEscape(r.name),
-        csvEscape(r.email),
-        csvEscape(r.consent),
-        csvEscape(new Date(r.created_at).toLocaleString()),
-        ...RESPONDENT_PROFILE_COLUMNS.map((c) => csvEscape(r.profile?.[c.key] ?? '')),
-        ...SURVEY_QUESTIONS.map((_, i) => csvEscape(r.answers?.[i + 1] ?? '')),
-        csvEscape(respondentMean(r).toFixed(2)),
-      ].join(',')
+      'Average'
+    ));
+    for (const r of responses) {
+      lines.push(row(
+        r.name,
+        r.email,
+        r.consent,
+        new Date(r.created_at).toLocaleString(),
+        ...RESPONDENT_PROFILE_COLUMNS.map((c) => r.profile?.[c.key] ?? ''),
+        ...SURVEY_QUESTIONS.map((_, i) => r.answers?.[i + 1] ?? ''),
+        respondentMean(r).toFixed(2)
+      ));
+    }
+
+    downloadFile(
+      `survey-results-${new Date().toISOString().slice(0, 10)}.csv`,
+      // BOM keeps x̄, Σ, and the en dashes readable when opened in Excel.
+      `\uFEFF${lines.join('\n')}`
     );
-    downloadFile(`survey-responses-${new Date().toISOString().slice(0, 10)}.csv`, [header.join(','), ...lines].join('\n'));
-    toast.success(`${responses.length} response${responses.length === 1 ? '' : 's'} exported.`);
+    toast.success('Survey results and weighted-mean computation exported.');
   };
 
   const printReport = () => {
@@ -863,7 +974,7 @@ function SurveyPanel() {
         })()}
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-          <button className="btn btn-green btn-sm" onClick={exportCsv}>⬇ Export CSV (responses)</button>
+          <button className="btn btn-green btn-sm" onClick={exportCsv}>⬇ Export CSV (results + computation)</button>
           <button className="btn btn-accent btn-sm" onClick={printReport}>🖨 Print report</button>
           <button className="btn btn-light btn-sm" onClick={refresh}>↻ Refresh</button>
         </div>

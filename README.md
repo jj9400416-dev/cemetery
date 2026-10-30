@@ -116,6 +116,9 @@ The form follows the administered respondent evaluation instrument:
 - **Print report:** the report explains `x̄ = Σ(f·w) / N`, then shows the frequency (`f`), weight
   (`w`), and `f·w` table plus the full substitution for every statement, followed by the overall
   weighted mean.
+- **CSV export:** the exported file contains the formula and definitions, a weighted-mean summary,
+  the `f` / `w` / `f·w` computation for every statement, the overall computation, and the
+  individual responses.
 
 Setup (run in Supabase Dashboard → SQL Editor):
 
