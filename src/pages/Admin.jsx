@@ -6,7 +6,16 @@ import { useRecords } from '../records.jsx';
 import { useSurvey } from '../survey.jsx';
 import { supabase } from '../supabaseClient.js';
 import { photoForName, mapImage, graveSection, INITIAL_MAP_SECTIONS } from '../data.js';
-import { SURVEY_QUESTIONS, LIKERT_OPTIONS, computeWeightedMean } from '../surveyData.js';
+import {
+  SURVEY_QUESTIONS,
+  SURVEY_SECTIONS,
+  RESPONDENT_PROFILE_COLUMNS,
+  LIKERT_OPTIONS,
+  computeWeightedMean,
+  interpretMean,
+  answeredCount,
+  isAnswered,
+} from '../surveyData.js';
 import { addCustomRoutes, ROUTES } from '../routing.js';
 import { PageHero, EmptyState, useToast } from '../ui.jsx';
 
@@ -601,6 +610,27 @@ function SurveyPanel() {
     ? answeredStats.reduce((a, b) => (b.mean > a.mean ? b : a))
     : null;
 
+  // Submitted rows vs rows that actually carry answers. N (the weighted-mean
+  // denominator) uses the latter, so a mismatch means some responses were
+  // saved without their answers.
+  const answered = answeredCount(responses);
+  const incomplete = responses.filter((r) => !isAnswered(r));
+
+  const removeIncomplete = async () => {
+    if (!incomplete.length) return;
+    setBusy(true);
+    for (const r of incomplete) {
+      const res = await removeResponse(r.id);
+      if (!res.ok) {
+        setBusy(false);
+        toast.error('Could not remove response: ' + res.error);
+        return;
+      }
+    }
+    setBusy(false);
+    toast.success(`${incomplete.length} incomplete response${incomplete.length === 1 ? '' : 's'} removed.`);
+  };
+
   const respondentMean = (r) => {
     const vals = SURVEY_QUESTIONS.map((_, i) => Number(r.answers?.[i + 1])).filter(Boolean);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
@@ -630,13 +660,22 @@ function SurveyPanel() {
   const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
   const exportCsv = () => {
-    const header = ['Name', 'Email', 'Consent', 'Submitted', ...SURVEY_QUESTIONS.map((_, i) => `Q${i + 1}`), 'Average'];
+    const header = [
+      'Name',
+      'Email',
+      'Consent',
+      'Submitted',
+      ...RESPONDENT_PROFILE_COLUMNS.map((c) => c.label),
+      ...SURVEY_QUESTIONS.map((_, i) => `Q${i + 1}`),
+      'Average',
+    ];
     const lines = responses.map((r) =>
       [
         csvEscape(r.name),
         csvEscape(r.email),
         csvEscape(r.consent),
         csvEscape(new Date(r.created_at).toLocaleString()),
+        ...RESPONDENT_PROFILE_COLUMNS.map((c) => csvEscape(r.profile?.[c.key] ?? '')),
         ...SURVEY_QUESTIONS.map((_, i) => csvEscape(r.answers?.[i + 1] ?? '')),
         csvEscape(respondentMean(r).toFixed(2)),
       ].join(',')
@@ -648,14 +687,99 @@ function SurveyPanel() {
   const printReport = () => {
     const w = window.open('', '_blank');
     if (!w) { toast.error('Popup blocked — allow popups to print.'); return; }
+
+    // Worked computation for every statement: option -> weight (w),
+    // frequency (f), and f·w. The per-question weighted mean is the sum of
+    // those products divided by N (the total number of responses to it).
+    const totalFw = stats.reduce((sum, s) => sum + s.sumFw, 0);
+    const totalN = stats.reduce((sum, s) => sum + s.n, 0);
+    const pooledMean = totalN ? totalFw / totalN : 0;
+    const itemMeans = answeredStats.map((s) => s.mean);
+
+    const optionRows = (s) => LIKERT_OPTIONS.map((o) => `
+      <tr>
+        <td>${o.label}</td>
+        <td class="num">${o.value}</td>
+        <td class="num">${s.counts[o.value]}</td>
+        <td class="num">${s.counts[o.value] * o.value}</td>
+      </tr>`).join('');
+
+    const computationBlocks = SURVEY_SECTIONS.map((section) => `
+      <h2>${section.title}</h2>
+      <p class="muted">${section.text}</p>
+      ${section.questionNos.map((no) => {
+        const s = stats.find((x) => x.no === no);
+        if (!s) return '';
+        return `
+          <div class="question">
+            <h3>${s.no}. ${s.text}</h3>
+            <table>
+              <thead><tr><th>Response option</th><th class="num">Weight (w)</th><th class="num">Frequency (f)</th><th class="num">f · w</th></tr></thead>
+              <tbody>
+                ${optionRows(s)}
+                <tr class="total"><td>Total</td><td class="num">—</td><td class="num">N = ${s.n}</td><td class="num">Σ(f·w) = ${s.sumFw}</td></tr>
+              </tbody>
+            </table>
+            <p class="calc">x̄ = Σ(f·w) ⁄ N = ${s.sumFw} ⁄ ${s.n} = <b>${s.n ? s.mean.toFixed(2) : '—'}</b>${s.n ? ` — ${s.interpretation.label}` : ''}</p>
+          </div>`;
+      }).join('')}
+    `).join('');
+
     w.document.write(`<!doctype html><html><head><title>Survey Results Report</title>
-      <style>body{font-family:Georgia,serif;padding:32px;color:#222}h1{margin-bottom:4px}table{border-collapse:collapse;width:100%;margin-top:14px}th,td{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:13px}th{background:#0f2a20;color:#fff}</style></head><body>
+      <style>
+        body{font-family:Georgia,serif;padding:32px;color:#222;line-height:1.5}
+        h1{margin:0 0 4px}
+        h2{font-size:19px;margin:26px 0 4px;padding-top:14px;border-top:1px solid #ddd}
+        h3{font-size:15px;margin:18px 0 8px}
+        p{margin:4px 0}
+        .muted{color:#666;font-size:13px}
+        .calc{background:#faf7ef;border:1px solid #e5dfcf;border-radius:6px;padding:8px 12px;font-size:13.5px;margin-top:8px}
+        table{border-collapse:collapse;width:100%;margin-top:10px}
+        th,td{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:13px}
+        th{background:#0f2a20;color:#fff}
+        .num{text-align:right;white-space:nowrap}
+        .total td{font-weight:700;background:#faf7ef}
+        .question{page-break-inside:avoid}
+        .note{font-size:12px;color:#666;margin-top:6px}
+      </style></head><body>
       <h1>Agnipa Memorial Park — Visitor Survey Results</h1>
-      <p>Generated ${new Date().toLocaleString()} · Total responses: <b>${responses.length}</b> · Overall weighted mean: <b>${overallMean ? overallMean.toFixed(2) : '—'}</b></p>
-      <p>Formula: x̄ = Σ(f·w) ⁄ N (w: Strongly Agree = 5 … Strongly Disagree = 1)</p>
-      <table><thead><tr><th>#</th><th>Statement</th><th>N</th><th>Σ(f·w)</th><th>x̄</th><th>Interpretation</th></tr></thead><tbody>
-      ${stats.map((s) => `<tr><td>${s.no}</td><td>${s.text}</td><td>${s.n}</td><td>${s.sumFw}</td><td>${s.n ? s.mean.toFixed(2) : '—'}</td><td>${s.interpretation.label}</td></tr>`).join('')}
-      </tbody></table>
+      <p>Generated ${new Date().toLocaleString()} · Total responses: <b>${responses.length}</b> · N (answered) = <b>${answered}</b></p>
+
+      <h2>How the weighted mean is computed</h2>
+      <p class="calc"><b>x̄ = Σ(f·w) ⁄ N</b></p>
+      <p class="muted">
+        <b>f</b> = frequency (number of respondents who chose an option) ·
+        <b>w</b> = weight of that option (Strongly Agree = 5, Agree = 4, Moderately Agree = 3, Disagree = 2, Strongly Disagree = 1) ·
+        <b>N</b> = total responses to the statement (N = Σf).
+      </p>
+      <p class="muted">
+        For each statement, multiply every option's frequency by its weight, add the products to get Σ(f·w), then divide by N.
+        The result is interpreted using the standard five-point bands (4.21–5.00 Strongly Agree, 3.41–4.20 Agree,
+        2.61–3.40 Moderately Agree, 1.81–2.60 Disagree, 1.00–1.80 Strongly Disagree).
+      </p>
+
+      <h2>Summary of weighted means</h2>
+      <table>
+        <thead><tr><th>#</th><th>Statement</th><th class="num">N</th><th class="num">Σ(f·w)</th><th class="num">x̄</th><th>Interpretation</th></tr></thead>
+        <tbody>
+          ${stats.map((s) => `<tr><td>${s.no}</td><td>${s.text}</td><td class="num">${s.n}</td><td class="num">${s.sumFw}</td><td class="num">${s.n ? s.mean.toFixed(2) : '—'}</td><td>${s.n ? s.interpretation.label : 'No responses'}</td></tr>`).join('')}
+        </tbody>
+      </table>
+
+      <h2>Computation per statement</h2>
+      ${computationBlocks}
+
+      <h2>Overall result</h2>
+      <p class="calc">
+        Overall weighted mean (mean of the ${itemMeans.length} item means):
+        x̄ = (${itemMeans.map((m) => m.toFixed(2)).join(' + ') || '—'}) ⁄ ${itemMeans.length || '—'} =
+        <b>${overallMean ? overallMean.toFixed(2) : '—'}</b>
+        ${overallMean ? ` — ${interpretMean(overallMean).label}` : ''}
+      </p>
+      <p class="note">
+        Pooled check across all answers: Σ(all f·w) ⁄ ΣN = ${totalFw} ⁄ ${totalN} = ${totalN ? pooledMean.toFixed(2) : '—'}.
+        The overall weighted mean above is the average of the per-statement weighted means, which gives each statement equal weight.
+      </p>
       <script>window.print();</script></body></html>`);
     w.document.close();
   };
@@ -663,7 +787,11 @@ function SurveyPanel() {
   return (
     <>
       <div className="grid grid-4" style={{ marginBottom: 22 }}>
-        <div className="card"><div className="kicker">Responses</div><div className="serif" style={{ fontSize: 36 }}>{responses.length}</div></div>
+        <div className="card">
+          <div className="kicker">Responses</div>
+          <div className="serif" style={{ fontSize: 36 }}>{responses.length}</div>
+          <div style={{ color: 'var(--muted)', fontSize: 13 }}>N (answered) = {answered}</div>
+        </div>
         <div className="card"><div className="kicker">Overall weighted mean</div><div className="serif" style={{ fontSize: 36 }}>{overallMean ? overallMean.toFixed(2) : '—'}</div></div>
         <div className="card">
           <div className="kicker">Highest-rated item</div>
@@ -682,12 +810,58 @@ function SurveyPanel() {
         <p style={{ color: 'var(--muted)', fontSize: 14, margin: '0 0 8px' }}>
           <span className={`status-dot ${databaseConnected ? 'on' : 'off'}`} />
           {databaseConnected
-            ? `Live responses from public.survey_responses · ${responses.length} total.`
+            ? `Live responses from public.survey_responses · ${responses.length} submitted · ${answered} counted in N.`
             : 'Offline mode — responses saved in this browser. Run supabase-survey.sql to collect them in the database.'}
         </p>
         <p className="wmean-formula">
           Formula: x̄ = Σ(f·w) ⁄ N — f = frequency of each option, w = its weight (Strongly Agree = 5, Agree = 4, Moderately Agree = 3, Disagree = 2, Strongly Disagree = 1), N = total responses.
         </p>
+
+        {answeredStats.length > 0 && (() => {
+          const example = answeredStats[0];
+          return (
+            <details className="wmean-worked">
+              <summary>Show how the weighted mean is computed (worked example: Q{example.no})</summary>
+              <p className="wmean-formula">
+                Multiply each option's frequency (f) by its weight (w), add the products to get
+                Σ(f·w), then divide by N (the number of respondents who answered this statement).
+              </p>
+              <div className="table-wrap">
+                <table className="records" style={{ minWidth: 0 }}>
+                  <thead>
+                    <tr><th>Response option</th><th>Weight (w)</th><th>Frequency (f)</th><th>f · w</th></tr>
+                  </thead>
+                  <tbody>
+                    {LIKERT_OPTIONS.map((o) => (
+                      <tr key={o.value}>
+                        <td>{o.label}</td>
+                        <td>{o.value}</td>
+                        <td>{example.counts[o.value]}</td>
+                        <td>{example.counts[o.value] * o.value}</td>
+                      </tr>
+                    ))}
+                    <tr style={{ fontWeight: 700, background: '#faf7ef' }}>
+                      <td>Total</td>
+                      <td>—</td>
+                      <td>N = {example.n}</td>
+                      <td>Σ(f·w) = {example.sumFw}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="wmean-formula">
+                x̄ = Σ(f·w) ⁄ N = {example.sumFw} ⁄ {example.n} ={' '}
+                <b>{example.mean.toFixed(2)}</b> — {example.interpretation.label}
+              </p>
+              <p className="wmean-formula">
+                The overall weighted mean is the average of the {answeredStats.length} item means:
+                x̄ = ({answeredStats.map((s) => s.mean.toFixed(2)).join(' + ')}) ⁄ {answeredStats.length} ={' '}
+                <b>{overallMean.toFixed(2)}</b>.
+              </p>
+            </details>
+          );
+        })()}
+
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
           <button className="btn btn-green btn-sm" onClick={exportCsv}>⬇ Export CSV (responses)</button>
           <button className="btn btn-accent btn-sm" onClick={printReport}>🖨 Print report</button>
@@ -696,6 +870,40 @@ function SurveyPanel() {
       </div>
 
       {dbError && <p className="error-text">Database: {dbError}</p>}
+
+      {incomplete.length > 0 && (
+        <div className="card" style={{ marginBottom: 22, borderLeft: '4px solid #e08e3c' }}>
+          <div className="kicker">Incomplete responses</div>
+          <p style={{ margin: '4px 0 10px', fontSize: 14 }}>
+            <b>{incomplete.length}</b> of {responses.length} submitted response{incomplete.length === 1 ? '' : 's'}{' '}
+            {incomplete.length === 1 ? 'was' : 'were'} saved without answers, so {incomplete.length === 1 ? 'it is' : 'they are'}{' '}
+            counted in the response total but excluded from N (the weighted-mean denominator).
+          </p>
+          <div className="table-wrap">
+            <table className="records" style={{ minWidth: 0 }}>
+              <thead>
+                <tr><th>Name</th><th>Email</th><th>Submitted</th><th>Answers</th></tr>
+              </thead>
+              <tbody>
+                {incomplete.map((r) => (
+                  <tr key={r.id}>
+                    <td><b>{r.name}</b></td>
+                    <td>{r.email}</td>
+                    <td>{new Date(r.created_at).toLocaleString()}</td>
+                    <td>none</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+            <button className="btn btn-red btn-sm" onClick={removeIncomplete} disabled={busy}>
+              {busy ? 'Removing…' : `Remove ${incomplete.length} incomplete response${incomplete.length === 1 ? '' : 's'}`}
+            </button>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="skeleton" style={{ height: 320 }} />
       ) : responses.length === 0 ? (
@@ -704,7 +912,17 @@ function SurveyPanel() {
         </div>
       ) : (
         <>
-          {stats.map((s) => (
+          {SURVEY_SECTIONS.map((section) => (
+            <div key={section.key} className="survey-result-section">
+              <div className="survey-section-head" style={{ marginTop: 22 }}>
+                <div className="kicker">{section.characteristic}</div>
+                <h3 className="serif">{section.title}</h3>
+                <p>{section.text}</p>
+              </div>
+              {section.questionNos
+                .map((no) => stats.find((s) => s.no === no))
+                .filter(Boolean)
+                .map((s) => (
             <div className="card" key={s.no} style={{ marginBottom: 16 }}>
               <div className="kicker">Question {s.no} of {SURVEY_QUESTIONS.length}</div>
               <h3 className="serif" style={{ margin: '4px 0 14px', fontSize: 19 }}>{s.text}</h3>
@@ -713,6 +931,12 @@ function SurveyPanel() {
                 <div style={{ minWidth: 160 }}>
                   <div className="wmean-badge">{s.mean ? s.mean.toFixed(2) : '—'} <small>/ 5.00</small></div>
                   <div className="wmean-formula">{s.interpretation.label} · N = {s.n}</div>
+                  {s.n !== responses.length && (
+                    <div className="wmean-formula" style={{ color: '#b3372a' }}>
+                      {responses.length - s.n} response{responses.length - s.n === 1 ? '' : 's'} without an
+                      answer excluded from N
+                    </div>
+                  )}
                 </div>
                 <div style={{ flex: '1 1 240px' }}>
                   <div className="dist-bar">
@@ -760,17 +984,20 @@ function SurveyPanel() {
                 x̄ = Σ(f·w) ⁄ N = {s.sumFw} ⁄ {s.n} = <b>{s.n ? s.mean.toFixed(2) : '—'}</b>
               </p>
             </div>
+                ))}
+            </div>
           ))}
 
           <div className="card" style={{ marginTop: 22 }}>
             <div className="kicker">Individual responses</div>
             <h3 className="serif" style={{ margin: '4px 0 12px' }}>Respondent list</h3>
             <div className="table-wrap">
-              <table className="records" style={{ minWidth: 720 }}>
+              <table className="records" style={{ minWidth: 940 }}>
                 <thead>
                   <tr>
                     <th>Name</th>
                     <th>Email</th>
+                    <th>Profile</th>
                     <th>Submitted</th>
                     {SURVEY_QUESTIONS.map((_, i) => <th key={i}>Q{i + 1}</th>)}
                     <th>x̄</th>
@@ -782,6 +1009,15 @@ function SurveyPanel() {
                     <tr key={r.id}>
                       <td><b>{r.name}</b></td>
                       <td>{r.email}</td>
+                      <td style={{ fontSize: 12.5, lineHeight: 1.55, minWidth: 150 }}>
+                        {RESPONDENT_PROFILE_COLUMNS.filter((c) => r.profile?.[c.key]).length === 0
+                          ? '—'
+                          : RESPONDENT_PROFILE_COLUMNS.map((c) =>
+                              r.profile?.[c.key] ? (
+                                <div key={c.key}><b>{c.label}:</b> {r.profile[c.key]}</div>
+                              ) : null
+                            )}
+                      </td>
                       <td>{new Date(r.created_at).toLocaleString()}</td>
                       {SURVEY_QUESTIONS.map((_, i) => <td key={i}>{r.answers?.[i + 1] ?? '—'}</td>)}
                       <td>{respondentMean(r).toFixed(2)}</td>

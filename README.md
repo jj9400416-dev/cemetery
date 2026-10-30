@@ -96,6 +96,51 @@ Notes:
 - The postbuild script copies `web/manifest.json` and `web/service-worker.js` into `web-build/` and injects a small SW registration snippet into `web-build/index.html`.
 - The service worker here is a minimal cache-first example. For production, consider using Workbox and a stricter caching strategy.
 
+## Visitor survey database
+
+The visitor survey on `/survey` stores results in Supabase: `public.survey_responses` (one row per
+respondent) and `public.survey_answers` (one row per answered question). The admin dashboard computes
+the weighted mean `x̄ = Σ(f·w) / N` from those rows.
+
+The form follows the administered respondent evaluation instrument:
+
+- **Part 1 — Respondent profile:** name and email (required), plus age, sex, relationship to the
+  deceased, visit frequency, device used, and browser used. Items that do not describe every
+  respondent are marked **when applicable** and may be left blank.
+- **Part 2 — Evaluation:** the 15 five-point Likert statements, grouped into the ISO/IEC 25010
+  characteristics they were drawn from (performance efficiency, functional suitability,
+  navigation/accuracy, reliability, usability/content, and compatibility). Question numbers are
+  stable because they are the keys stored in `public.survey_answers`; append new items instead of
+  inserting them in the middle. The admin results panel uses the same sections, shows each
+  respondent's profile, and includes the profile columns in the CSV export.
+- **Print report:** the report explains `x̄ = Σ(f·w) / N`, then shows the frequency (`f`), weight
+  (`w`), and `f·w` table plus the full substitution for every statement, followed by the overall
+  weighted mean.
+
+Setup (run in Supabase Dashboard → SQL Editor):
+
+```bash
+# one-time: tables, policies and the atomic submit function
+supabase-survey.sql        # or: supabase-setup-all.sql (everything)
+```
+
+Notes:
+
+- Run `supabase-survey.sql` (or `supabase-setup-all.sql`) again after updating it — both files are
+  re-runnable and also install `public.submit_survey_response()`, which writes the response and its
+  answers in a single transaction so a response can never be saved without its answers. Re-running
+  also adds the nullable respondent-profile columns (`age`, `sex`, `relationship`,
+  `visit_frequency`, `device_used`, `browser_used`). The app keeps working against an older table:
+  it retries without the profile columns if they have not been installed yet.
+- Without that function the app still works: it writes the two parts separately and rolls the
+  response row back if the answers fail to save.
+- `N` in the results panel counts responses that actually carry answers. If `N` is lower than the
+  response total, some response was saved without answers — the admin panel lists them and offers a
+  one-click "Remove incomplete responses" action.
+- Responses contain names, emails, and respondent-profile details, and the current policies allow
+  anonymous reads. For production, restrict the select policies to `authenticated` or move the
+  aggregation behind a security-definer view.
+
 ## Deploying the PWA (Vercel or Netlify)
 
 Both Vercel and Netlify provide automatic HTTPS for deployed sites. Choose one of the options below.

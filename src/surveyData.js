@@ -1,5 +1,11 @@
 // Visitor survey definition + weighted-mean helpers.
 // Shared by the public survey page and the admin results panel.
+//
+// The form mirrors the respondent evaluation instrument: a short respondent
+// profile followed by the 15 evaluation statements, grouped under the
+// ISO/IEC 25010 characteristics they were drawn from. Question numbers are
+// stable — they are the keys stored in public.survey_answers — so new items
+// must be appended, never inserted in the middle.
 
 export const SURVEY_QUESTIONS = [
   'The survey responds quickly.',
@@ -27,6 +33,116 @@ export const LIKERT_OPTIONS = [
   { label: 'Moderately Agree', short: 'MA', value: 3, color: '#c9a227' },
   { label: 'Disagree', short: 'D', value: 2, color: '#e08e3c' },
   { label: 'Strongly Disagree', short: 'SD', value: 1, color: '#b3372a' },
+];
+
+// The administered instrument is divided into evaluation areas. `questionNos`
+// are 1-based and map straight onto SURVEY_QUESTIONS above, so a section can
+// never drift away from the statements it contains.
+export const SURVEY_SECTIONS = [
+  {
+    key: 'performance',
+    title: 'Performance efficiency',
+    characteristic: 'ISO/IEC 25010 · Performance efficiency',
+    text: 'How quickly and efficiently the system responds.',
+    questionNos: [1, 2, 3],
+  },
+  {
+    key: 'functional',
+    title: 'Functional suitability',
+    characteristic: 'ISO/IEC 25010 · Functional suitability',
+    text: 'Whether the system performs the task it is intended to perform.',
+    questionNos: [4, 5],
+  },
+  {
+    key: 'navigation',
+    title: 'Navigation and accuracy',
+    characteristic: 'ISO/IEC 25010 · Functional correctness / Usability',
+    text: 'Whether the map, routes, and deceased records are clear and correct.',
+    questionNos: [6, 7, 8],
+  },
+  {
+    key: 'reliability',
+    title: 'Reliability',
+    characteristic: 'ISO/IEC 25010 · Reliability',
+    text: 'Whether the system runs without error.',
+    questionNos: [9],
+  },
+  {
+    key: 'usability',
+    title: 'Usability and content',
+    characteristic: 'ISO/IEC 25010 · Usability / Functional correctness',
+    text: 'Whether the system is easy to use and its content is accurate.',
+    questionNos: [10, 11, 12],
+  },
+  {
+    key: 'compatibility',
+    title: 'Compatibility',
+    characteristic: 'ISO/IEC 25010 · Compatibility',
+    text: 'Whether the system works across devices and web browsers.',
+    questionNos: [13, 14, 15],
+  },
+];
+
+// Respondent profile fields collected before the evaluation proper. Items
+// marked `whenApplicable` are optional and shown with a "when applicable"
+// note, because they do not describe every respondent (e.g. a visitor who is
+// not related to anyone interred in the park).
+export const RESPONDENT_PROFILE_FIELDS = [
+  {
+    key: 'age',
+    label: 'Age',
+    type: 'number',
+    placeholder: 'e.g. 28',
+    min: 1,
+    max: 120,
+    autoComplete: 'age',
+  },
+  {
+    key: 'sex',
+    label: 'Sex',
+    type: 'select',
+    options: ['Female', 'Male', 'Prefer not to say'],
+  },
+  {
+    key: 'relationship',
+    label: 'Relationship to the deceased',
+    type: 'select',
+    whenApplicable: true,
+    hint: 'Answer this only if you are visiting a relative or someone you know.',
+    options: ['Spouse', 'Parent', 'Child', 'Sibling', 'Relative', 'Friend', 'Other'],
+  },
+  {
+    key: 'visitFrequency',
+    label: 'How often do you visit the park?',
+    type: 'select',
+    options: ['First visit', 'Weekly', 'Monthly', 'A few times a year', 'Rarely'],
+  },
+  {
+    key: 'device',
+    label: 'Device used to access the system',
+    type: 'select',
+    whenApplicable: true,
+    hint: 'Answer this only if you used the online system during your visit.',
+    options: ['Smartphone', 'Tablet', 'Laptop', 'Desktop computer'],
+  },
+  {
+    key: 'browser',
+    label: 'Web browser used',
+    type: 'select',
+    whenApplicable: true,
+    hint: 'Answer this only if you know which browser you used.',
+    options: ['Chrome', 'Microsoft Edge', 'Firefox', 'Safari', 'Other'],
+  },
+];
+
+// Storage/display order for the profile columns on public.survey_responses.
+export const RESPONDENT_PROFILE_COLUMNS = [
+  { key: 'age', label: 'Age' },
+  { key: 'sex', label: 'Sex' },
+  { key: 'relationship', label: 'Relationship' },
+  { key: 'visit_frequency', label: 'Visit frequency' },
+  { key: 'device_used', label: 'Device used' },
+  { key: 'browser_used', label: 'Browser used' },
 ];
 
 export const likertLabel = (value) =>
@@ -61,4 +177,18 @@ export function computeWeightedMean(responses, questionNo) {
   const sumFw = LIKERT_OPTIONS.reduce((sum, o) => sum + counts[o.value] * o.value, 0);
   const mean = n ? sumFw / n : 0;
   return { counts, n, sumFw, mean, interpretation: interpretMean(mean) };
+}
+
+// A response counts towards N only if it carries at least one valid Likert
+// value. Rows whose answer write failed stay in the response total but are
+// skipped here, which is why the two numbers can differ.
+export function isAnswered(response) {
+  return SURVEY_QUESTIONS.some((_, i) => {
+    const v = Number(response?.answers?.[i + 1]);
+    return LIKERT_OPTIONS.some((o) => o.value === v);
+  });
+}
+
+export function answeredCount(responses) {
+  return responses.reduce((sum, r) => sum + (isAnswered(r) ? 1 : 0), 0);
 }
